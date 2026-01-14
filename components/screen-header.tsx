@@ -58,10 +58,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   title: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifBoldItalic,
     fontSize: FontSizes['3xl'],
-    fontWeight: '700',
-    fontStyle: 'italic',
     color: Colors.stamp,
   },
   actions: {

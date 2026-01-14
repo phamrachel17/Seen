@@ -65,15 +65,15 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: Fonts.serifBold,
-    fontSize: FontSizes['6xl'],
+    fontSize: 72,
     color: Colors.stamp,
-    letterSpacing: -1,
+    letterSpacing: -2,
   },
   tagline: {
-    fontFamily: Fonts.serifMedium,
-    fontSize: FontSizes.xl,
+    fontFamily: Fonts.serifItalic,
+    fontSize: FontSizes['2xl'],
     color: Colors.stamp,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.sm,
   },
   illustrationContainer: {
     flex: 1,

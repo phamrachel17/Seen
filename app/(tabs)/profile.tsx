@@ -130,9 +130,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   headerTitle: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
-    fontWeight: '600',
     color: Colors.text,
     letterSpacing: 2,
   },
@@ -167,14 +166,13 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   profileImageText: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
   },
   profileName: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['4xl'],
-    fontWeight: '700',
     color: Colors.text,
     letterSpacing: 2,
   },
@@ -183,7 +181,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   identityLabel: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
@@ -195,9 +193,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   identityValue: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifItalic,
     fontSize: FontSizes.xl,
-    fontStyle: 'italic',
     color: Colors.stamp,
   },
   followStats: {
@@ -209,13 +206,12 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   followNumber: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
-    fontWeight: '600',
     color: Colors.text,
   },
   followLabel: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
   },
@@ -233,13 +229,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statNumber: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['2xl'],
-    fontWeight: '700',
     color: Colors.text,
   },
   statLabel: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
@@ -260,23 +255,22 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   sectionLabel: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
   },
   viewAll: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.xs,
     color: Colors.navy,
-    fontWeight: '600',
   },
   placeholder: {
     paddingVertical: Spacing['2xl'],
     alignItems: 'center',
   },
   placeholderText: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
@@ -296,7 +290,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   signOutText: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
   },

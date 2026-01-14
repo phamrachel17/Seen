@@ -1,10 +1,73 @@
-import { View, Text, TextInput, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { MovieGrid } from '@/components/movie-card';
+import { searchMovies, getTrendingMovies } from '@/lib/tmdb';
+import { Movie } from '@/types';
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Movie[]>([]);
+  const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingTrending, setIsLoadingTrending] = useState(true);
+
+  // Load trending movies on mount
+  useEffect(() => {
+    loadTrendingMovies();
+  }, []);
+
+  const loadTrendingMovies = async () => {
+    try {
+      setIsLoadingTrending(true);
+      const movies = await getTrendingMovies();
+      setTrendingMovies(movies.slice(0, 12)); // Show top 12
+    } catch (error) {
+      console.error('Error loading trending movies:', error);
+    } finally {
+      setIsLoadingTrending(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const { movies } = await searchMovies(searchQuery);
+        setSearchResults(movies);
+      } catch (error) {
+        console.error('Search error:', error);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+    setSearchResults([]);
+  }, []);
+
+  const isShowingSearch = searchQuery.trim().length > 0;
 
   return (
     <View style={styles.container}>
@@ -15,9 +78,6 @@ export default function DiscoverScreen() {
           <Pressable style={styles.iconButton}>
             <IconSymbol name="bell" size={22} color={Colors.text} />
           </Pressable>
-          <Pressable style={styles.iconButton}>
-            <IconSymbol name="person" size={22} color={Colors.text} />
-          </Pressable>
         </View>
       </View>
 
@@ -27,9 +87,19 @@ export default function DiscoverScreen() {
           <IconSymbol name="magnifyingglass" size={18} color={Colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search directors, titles, years..."
+            placeholder="Search movies..."
             placeholderTextColor={Colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
           />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={clearSearch} hitSlop={8}>
+              <IconSymbol name="xmark" size={18} color={Colors.textMuted} />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -37,19 +107,49 @@ export default function DiscoverScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* Curated List Header */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>The Curated List</Text>
-          <Text style={styles.issueNumber}>ISSUE NO. 04</Text>
-        </View>
+        {isShowingSearch ? (
+          <>
+            {/* Search Results */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Search Results</Text>
+              {isSearching && <ActivityIndicator size="small" color={Colors.stamp} />}
+            </View>
 
-        {/* Placeholder for movie grid */}
-        <View style={styles.placeholder}>
-          <Text style={styles.placeholderText}>
-            Discover new films here
-          </Text>
-        </View>
+            {searchResults.length > 0 ? (
+              <MovieGrid movies={searchResults} columns={3} />
+            ) : !isSearching ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  No movies found for &quot;{searchQuery}&quot;
+                </Text>
+              </View>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {/* Curated/Trending List */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>The Curated List</Text>
+              <Text style={styles.issueNumber}>TRENDING</Text>
+            </View>
+
+            {isLoadingTrending ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={Colors.stamp} />
+              </View>
+            ) : trendingMovies.length > 0 ? (
+              <MovieGrid movies={trendingMovies} columns={3} />
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  Unable to load movies. Check your API key.
+                </Text>
+              </View>
+            )}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -68,10 +168,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   title: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifBoldItalic,
     fontSize: FontSizes['3xl'],
-    fontWeight: '700',
-    fontStyle: 'italic',
     color: Colors.stamp,
   },
   headerActions: {
@@ -98,7 +196,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.text,
   },
@@ -112,27 +210,30 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
     marginBottom: Spacing.lg,
   },
   sectionTitle: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifItalic,
     fontSize: FontSizes['2xl'],
-    fontStyle: 'italic',
     color: Colors.stamp,
   },
   issueNumber: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
   },
-  placeholder: {
+  loadingContainer: {
     paddingVertical: Spacing['4xl'],
     alignItems: 'center',
   },
-  placeholderText: {
-    fontFamily: Fonts?.sans,
+  emptyState: {
+    paddingVertical: Spacing['4xl'],
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',

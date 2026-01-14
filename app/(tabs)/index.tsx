@@ -38,9 +38,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing['3xl'],
   },
   sectionTitle: {
-    fontFamily: Fonts?.serif,
+    fontFamily: Fonts.serifItalic,
     fontSize: FontSizes['2xl'],
-    fontStyle: 'italic',
     color: Colors.text,
     marginBottom: Spacing.xl,
   },
@@ -49,7 +48,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   placeholderText: {
-    fontFamily: Fonts?.sans,
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
