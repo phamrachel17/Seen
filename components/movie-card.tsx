@@ -6,6 +6,10 @@ import { Movie } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// Calculate available width after padding
+const CONTENT_WIDTH = SCREEN_WIDTH - Spacing.xl * 2;
+const GAP = Spacing.sm; // Gap between cards
+
 interface MovieCardProps {
   movie: Movie;
   size?: 'small' | 'medium' | 'large';
@@ -15,15 +19,17 @@ interface MovieCardProps {
 
 const CARD_SIZES = {
   small: {
-    width: (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.md * 2) / 3,
+    // 3 columns: (contentWidth - 2 gaps) / 3
+    width: (CONTENT_WIDTH - GAP * 2) / 3,
     aspectRatio: 2 / 3,
   },
   medium: {
-    width: (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.md) / 2,
+    // 2 columns: (contentWidth - 1 gap) / 2
+    width: (CONTENT_WIDTH - GAP) / 2,
     aspectRatio: 2 / 3,
   },
   large: {
-    width: SCREEN_WIDTH - Spacing.xl * 2,
+    width: CONTENT_WIDTH,
     aspectRatio: 2 / 3,
   },
 };
@@ -71,7 +77,7 @@ export function MovieCard({ movie, size = 'small', showInfo = true, onPress }: M
           </Text>
           <Text style={styles.meta}>
             {movie.release_year}
-            {movie.director && ` \u2022 ${movie.director}`}
+            {movie.director && ` • ${movie.director}`}
           </Text>
         </View>
       )}
@@ -145,6 +151,6 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.md,
+    gap: GAP,
   },
 });

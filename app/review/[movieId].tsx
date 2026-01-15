@@ -82,7 +82,7 @@ export default function ReviewModal() {
     setIsSaving(true);
 
     try {
-      // Cache the movie first
+      // Cache the movie first with all attributes
       const { error: movieError } = await supabase.from('movies').upsert({
         id: movie.id,
         title: movie.title,
@@ -94,6 +94,8 @@ export default function ReviewModal() {
         synopsis: movie.synopsis,
         popularity_score: movie.popularity_score,
         runtime_minutes: movie.runtime_minutes,
+        collection_id: movie.collection_id,
+        collection_name: movie.collection_name,
       });
 
       if (movieError) {
@@ -123,6 +125,8 @@ export default function ReviewModal() {
           console.error('Error updating review:', error);
           return;
         }
+        // Go back when editing
+        router.back();
       } else {
         // Create new review
         const { error } = await supabase.from('reviews').insert(reviewData);
@@ -131,9 +135,9 @@ export default function ReviewModal() {
           console.error('Error inserting review:', error);
           return;
         }
+        // Navigate to ranking flow with star rating for tier-based ranking
+        router.replace(`/rank/${movie.id}?starRating=${starRating}`);
       }
-
-      router.back();
     } catch (error) {
       console.error('Error saving review:', error);
     } finally {

@@ -1,12 +1,115 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
+  RefreshControl,
+} from 'react-native';
+import { Image } from 'expo-image';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
+import { Movie, Review } from '@/types';
+
+interface ReviewWithMovie extends Review {
+  movies: Movie;
+}
+
+interface UserStats {
+  totalFilms: number;
+  totalMinutes: number;
+  rankingsCount: number;
+}
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { signOut, user } = useAuth();
+
+  const [stats, setStats] = useState<UserStats>({
+    totalFilms: 0,
+    totalMinutes: 0,
+    rankingsCount: 0,
+  });
+  const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadUserData = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      // Load reviews count and total watch time
+      const { data: reviews, error: reviewsError } = await supabase
+        .from('reviews')
+        .select(`
+          id,
+          movies (runtime_minutes)
+        `)
+        .eq('user_id', user.id);
+
+      if (!reviewsError && reviews) {
+        const totalMinutes = reviews.reduce((acc, r) => {
+          const movie = r.movies as { runtime_minutes: number } | null;
+          return acc + (movie?.runtime_minutes || 0);
+        }, 0);
+
+        setStats((prev) => ({
+          ...prev,
+          totalFilms: reviews.length,
+          totalMinutes,
+        }));
+      }
+
+      // Load rankings count
+      const { count: rankingsCount } = await supabase
+        .from('rankings')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      setStats((prev) => ({
+        ...prev,
+        rankingsCount: rankingsCount || 0,
+      }));
+
+      // Load recent reviews
+      const { data: recentData, error: recentError } = await supabase
+        .from('reviews')
+        .select(`
+          *,
+          movies (*)
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(6);
+
+      if (!recentError && recentData) {
+        const reviewsWithMovies = recentData.filter(
+          (item: ReviewWithMovie) => item.movies
+        ) as ReviewWithMovie[];
+        setRecentReviews(reviewsWithMovies);
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUserData();
+    }, [loadUserData])
+  );
+
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await loadUserData();
+    setIsRefreshing(false);
+  };
 
   const handleSignOut = () => {
     Alert.alert(
@@ -19,6 +122,19 @@ export default function ProfileScreen() {
     );
   };
 
+  const formatWatchTime = (minutes: number) => {
+    const days = Math.floor(minutes / (24 * 60));
+    const hours = Math.floor((minutes % (24 * 60)) / 60);
+    if (days > 0) {
+      return `${days}d ${hours}h`;
+    }
+    return `${hours}h`;
+  };
+
+  const navigateToMovie = (movieId: number) => {
+    router.push(`/movie/${movieId}`);
+  };
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -29,7 +145,7 @@ export default function ProfileScreen() {
         <Text style={styles.headerTitle}>SEEN</Text>
         <Pressable style={styles.iconButton} onPress={handleSignOut}>
           <View style={styles.settingsIcon}>
-            <IconSymbol name="arrow.left" size={18} color={Colors.textMuted} />
+            <IconSymbol name="rectangle.portrait.and.arrow.right" size={18} color={Colors.textMuted} />
           </View>
         </Pressable>
       </View>
@@ -38,14 +154,21 @@ export default function ProfileScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.stamp}
+          />
+        }
       >
         {/* Profile Image Placeholder */}
         <View style={styles.profileImageContainer}>
           <View style={styles.profileImagePlaceholder}>
-            <Text style={styles.profileImageText}>Profile Image</Text>
+            <IconSymbol name="person.fill" size={48} color={Colors.textMuted} />
           </View>
           <Text style={styles.profileName}>
-            {user?.user_metadata?.username?.toUpperCase() || 'YOUR NAME'}
+            {user?.user_metadata?.username?.toUpperCase() || 'CINEPHILE'}
           </Text>
         </View>
 
@@ -70,18 +193,22 @@ export default function ProfileScreen() {
         {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>0</Text>
+            <Text style={styles.statNumber}>{stats.totalFilms}</Text>
             <Text style={styles.statLabel}>FILMS</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>0</Text>
-            <Text style={styles.statLabel}>DAYS</Text>
+            <Text style={styles.statNumber}>
+              {stats.totalMinutes > 0 ? formatWatchTime(stats.totalMinutes) : '—'}
+            </Text>
+            <Text style={styles.statLabel}>WATCHED</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>—</Text>
-            <Text style={styles.statLabel}>RANK</Text>
+            <Text style={styles.statNumber}>
+              {stats.rankingsCount > 0 ? stats.rankingsCount : '—'}
+            </Text>
+            <Text style={styles.statLabel}>RANKED</Text>
           </View>
         </View>
 
@@ -89,15 +216,61 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>RECENT ARCHIVES</Text>
-            <Pressable>
-              <Text style={styles.viewAll}>VIEW ALL</Text>
-            </Pressable>
+            {recentReviews.length > 0 && (
+              <Pressable onPress={() => router.push('/(tabs)')}>
+                <Text style={styles.viewAll}>VIEW ALL</Text>
+              </Pressable>
+            )}
           </View>
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>
-              Your recent activity will appear here
-            </Text>
-          </View>
+
+          {recentReviews.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentScroll}
+            >
+              {recentReviews.map((review) => (
+                <Pressable
+                  key={review.id}
+                  style={({ pressed }) => [
+                    styles.recentCard,
+                    pressed && styles.cardPressed,
+                  ]}
+                  onPress={() => navigateToMovie(review.movie_id)}
+                >
+                  {review.movies.poster_url ? (
+                    <Image
+                      source={{ uri: review.movies.poster_url }}
+                      style={styles.recentPoster}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={[styles.recentPoster, styles.posterPlaceholder]}>
+                      <Text style={styles.placeholderLetter}>
+                        {review.movies.title[0]}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.recentStars}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <IconSymbol
+                        key={star}
+                        name={star <= review.star_rating ? 'star.fill' : 'star'}
+                        size={10}
+                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
+                      />
+                    ))}
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.placeholder}>
+              <Text style={styles.placeholderText}>
+                Your recent activity will appear here
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Sign Out Button */}
@@ -164,11 +337,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.lg,
-  },
-  profileImageText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
   },
   profileName: {
     fontFamily: Fonts.serifBold,
@@ -246,13 +414,13 @@ const styles = StyleSheet.create({
   },
   section: {
     marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
     marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
   },
   sectionLabel: {
     fontFamily: Fonts.sans,
@@ -265,9 +433,41 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.navy,
   },
+  recentScroll: {
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.md,
+  },
+  recentCard: {
+    width: 80,
+  },
+  cardPressed: {
+    opacity: 0.8,
+  },
+  recentPoster: {
+    width: 80,
+    height: 120,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.dust,
+  },
+  posterPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderLetter: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.xl,
+    color: Colors.textMuted,
+  },
+  recentStars: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 1,
+    marginTop: Spacing.xs,
+  },
   placeholder: {
     paddingVertical: Spacing['2xl'],
     alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
   },
   placeholderText: {
     fontFamily: Fonts.sans,

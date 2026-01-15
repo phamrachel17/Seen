@@ -14,13 +14,14 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { getMovieDetails } from '@/lib/tmdb';
 import {
-  getUserRankings,
-  initializeRankingState,
+  getUserRankingsWithRatings,
+  initializeRankingStateWithTier,
   getCurrentComparison,
   processComparison,
   saveRanking,
   RankingState,
   Comparison,
+  RankedMovie,
 } from '@/lib/ranking';
 import { useAuth } from '@/lib/auth-context';
 import { Movie } from '@/types';
@@ -29,8 +30,31 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.lg) / 2;
 const CARD_HEIGHT = CARD_WIDTH * 1.5;
 
+// Star display component
+function StarRating({ rating, size = 12 }: { rating: number; size?: number }) {
+  return (
+    <View style={styles.starsContainer}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Text
+          key={star}
+          style={[
+            styles.starIcon,
+            { fontSize: size },
+            star <= rating ? styles.starFilled : styles.starEmpty,
+          ]}
+        >
+          ★
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 export default function RankingModal() {
-  const { movieId } = useLocalSearchParams<{ movieId: string }>();
+  const { movieId, starRating: starRatingParam } = useLocalSearchParams<{
+    movieId: string;
+    starRating?: string;
+  }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -39,31 +63,34 @@ export default function RankingModal() {
   const [isSaving, setIsSaving] = useState(false);
   const [rankingState, setRankingState] = useState<RankingState | null>(null);
   const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [starRating, setStarRating] = useState<number>(3);
 
   useEffect(() => {
     if (movieId && user) {
-      initializeRanking(parseInt(movieId, 10));
+      const rating = starRatingParam ? parseInt(starRatingParam, 10) : 3;
+      setStarRating(rating);
+      initializeRanking(parseInt(movieId, 10), rating);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movieId, user]);
+  }, [movieId, user, starRatingParam]);
 
-  const initializeRanking = async (id: number) => {
+  const initializeRanking = async (id: number, rating: number) => {
     try {
       setIsLoading(true);
 
       // Fetch the movie to rank
       const movie = await getMovieDetails(id);
 
-      // Fetch user's existing rankings
-      const existingRankings = await getUserRankings(user!.id);
+      // Fetch user's existing rankings with star ratings
+      const existingRankings = await getUserRankingsWithRatings(user!.id);
 
-      // Initialize ranking state
-      const state = initializeRankingState(movie, existingRankings);
+      // Initialize ranking state with tier awareness
+      const state = initializeRankingStateWithTier(movie, rating, existingRankings);
       setRankingState(state);
 
       if (state.isComplete) {
-        // No comparisons needed (first movie or re-ranking)
-        await finishRanking(state);
+        // No comparisons needed (first movie in tier)
+        await finishRanking(state, rating);
       } else {
         // Get first comparison
         setComparison(getCurrentComparison(state));
@@ -82,26 +109,29 @@ export default function RankingModal() {
     setRankingState(newState);
 
     if (newState.isComplete) {
-      await finishRanking(newState);
+      await finishRanking(newState, starRating);
     } else {
       setComparison(getCurrentComparison(newState));
     }
   };
 
-  const finishRanking = async (state: RankingState) => {
+  const finishRanking = async (state: RankingState, rating: number) => {
     setIsSaving(true);
 
     try {
-      await saveRanking(user!.id, state.newMovie, state.finalPosition);
-      // Show success briefly then close
+      await saveRanking(user!.id, state.newMovie, state.tierPosition, rating);
+      // Navigate to lists quickly
       setTimeout(() => {
-        router.back();
-      }, 1500);
+        router.replace('/(tabs)/lists');
+      }, 600);
     } catch (error) {
       console.error('Error saving ranking:', error);
       setIsSaving(false);
     }
   };
+
+  // Get tier movie count for context
+  const tierMovieCount = rankingState?.tierMovies.length || 0;
 
   if (isLoading) {
     return (
@@ -126,14 +156,17 @@ export default function RankingModal() {
             <>
               <Text style={styles.completionTitle}>Ranked!</Text>
               <View style={styles.rankBadge}>
-                <Text style={styles.rankNumber}>#{rankingState.finalPosition}</Text>
+                <Text style={styles.rankNumber}>#{rankingState.tierPosition}</Text>
               </View>
               <Text style={styles.movieTitle}>{rankingState.newMovie.title}</Text>
-              <Text style={styles.completionSubtitle}>
-                {rankingState.rankedMovies.length === 0
-                  ? 'Your first ranked film!'
-                  : `Out of ${rankingState.rankedMovies.length + 1} films`}
-              </Text>
+              <View style={styles.tierContext}>
+                <StarRating rating={starRating} size={16} />
+                <Text style={styles.completionSubtitle}>
+                  {tierMovieCount === 0
+                    ? `First in your ${starRating}-star films`
+                    : `#${rankingState.tierPosition} of ${tierMovieCount + 1} ${starRating}-star films`}
+                </Text>
+              </View>
             </>
           )}
         </View>
@@ -166,6 +199,14 @@ export default function RankingModal() {
           </Text>
         </View>
         <View style={styles.headerSpacer} />
+      </View>
+
+      {/* Tier Context */}
+      <View style={styles.tierContextHeader}>
+        <StarRating rating={starRating} size={14} />
+        <Text style={styles.tierContextText}>
+          Ranking among your {starRating}-star films
+        </Text>
       </View>
 
       {/* Question */}
@@ -231,7 +272,7 @@ export default function RankingModal() {
           </View>
           <View style={styles.rankIndicator}>
             <Text style={styles.rankIndicatorText}>
-              #{(comparison.movieB as Movie & { ranking?: { rank_position: number } }).ranking?.rank_position || '?'}
+              #{comparison.movieB.ranking?.rank_position || '?'}
             </Text>
           </View>
         </Pressable>
@@ -305,6 +346,21 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  tierContextHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.cardBackground,
+    marginHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.sm,
+  },
+  tierContextText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
   },
   questionContainer: {
     alignItems: 'center',
@@ -448,6 +504,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: Spacing.sm,
   },
+  tierContext: {
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
   completionSubtitle: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
@@ -458,5 +518,18 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     marginTop: Spacing.lg,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  starIcon: {
+    fontFamily: Fonts.sans,
+  },
+  starFilled: {
+    color: Colors.stamp,
+  },
+  starEmpty: {
+    color: Colors.dust,
   },
 });

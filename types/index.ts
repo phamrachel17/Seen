@@ -18,6 +18,8 @@ export interface Movie {
   synopsis?: string;
   popularity_score: number;
   runtime_minutes?: number;
+  collection_id?: number;    // TMDB collection ID (franchise)
+  collection_name?: string;  // e.g., "The Dark Knight Collection"
 }
 
 export interface Review {

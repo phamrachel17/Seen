@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   ActivityIndicator,
   Dimensions,
+  Animated,
+  StatusBar,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,13 +20,16 @@ import { useAuth } from '@/lib/auth-context';
 import { Movie, Review, Ranking } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const POSTER_HEIGHT = SCREEN_WIDTH * 0.7;
+const HEADER_MIN_HEIGHT = 220;
+const HEADER_MAX_HEIGHT = 400;
 
 export default function MovieDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   const [movie, setMovie] = useState<Movie | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -104,7 +108,6 @@ export default function MovieDetailScreen() {
 
     try {
       if (isBookmarked) {
-        // Remove bookmark
         await supabase
           .from('bookmarks')
           .delete()
@@ -112,7 +115,6 @@ export default function MovieDetailScreen() {
           .eq('movie_id', movie.id);
         setIsBookmarked(false);
       } else {
-        // Add bookmark (also cache movie data)
         await cacheMovie(movie);
         await supabase.from('bookmarks').insert({
           user_id: user.id,
@@ -128,7 +130,6 @@ export default function MovieDetailScreen() {
   };
 
   const cacheMovie = async (movieData: Movie) => {
-    // Upsert movie to cache
     await supabase.from('movies').upsert({
       id: movieData.id,
       title: movieData.title,
@@ -149,6 +150,27 @@ export default function MovieDetailScreen() {
     }
   };
 
+  // Animated header height - expands when pulling down
+  const headerHeight = scrollY.interpolate({
+    inputRange: [-100, 0],
+    outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
+    extrapolate: 'clamp',
+  });
+
+  // Scale image when pulling down for stretch effect
+  const imageScale = scrollY.interpolate({
+    inputRange: [-100, 0],
+    outputRange: [1.3, 1],
+    extrapolate: 'clamp',
+  });
+
+  // Translate image to keep it centered when scaling
+  const imageTranslateY = scrollY.interpolate({
+    inputRange: [-100, 0],
+    outputRange: [-50, 0],
+    extrapolate: 'clamp',
+  });
+
   if (isLoading) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
@@ -168,12 +190,44 @@ export default function MovieDetailScreen() {
     );
   }
 
+  // Use backdrop for widescreen header, fall back to poster
+  const headerImageUrl = movie.backdrop_url || movie.poster_url;
+
   return (
     <View style={styles.container}>
-      {/* Header */}
+      <StatusBar barStyle="light-content" />
+
+      {/* Animated Header with Stretchable Image */}
+      <Animated.View style={[styles.headerImageContainer, { height: headerHeight }]}>
+        {headerImageUrl ? (
+          <Animated.View
+            style={[
+              styles.imageWrapper,
+              {
+                transform: [{ scale: imageScale }, { translateY: imageTranslateY }],
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: headerImageUrl }}
+              style={styles.headerImage}
+              contentFit="cover"
+              transition={200}
+            />
+          </Animated.View>
+        ) : (
+          <View style={styles.headerPlaceholder}>
+            <Text style={styles.headerPlaceholderText}>{movie.title[0]}</Text>
+          </View>
+        )}
+        {/* Gradient overlay */}
+        <View style={styles.headerGradient} />
+      </Animated.View>
+
+      {/* Header Buttons */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <IconSymbol name="arrow.left" size={24} color={Colors.text} />
+          <IconSymbol name="arrow.left" size={24} color={Colors.white} />
         </Pressable>
         <Pressable
           onPress={toggleBookmark}
@@ -183,52 +237,45 @@ export default function MovieDetailScreen() {
           <IconSymbol
             name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
             size={24}
-            color={isBookmarked ? Colors.stamp : Colors.text}
+            color={isBookmarked ? Colors.stamp : Colors.white}
           />
         </Pressable>
       </View>
 
-      <ScrollView
+      {/* Scrollable Content */}
+      <Animated.ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: HEADER_MIN_HEIGHT }]}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
+        )}
       >
-        {/* Poster */}
-        <View style={styles.posterContainer}>
-          {movie.poster_url ? (
-            <Image
-              source={{ uri: movie.poster_url }}
-              style={styles.poster}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={styles.posterPlaceholder}>
-              <Text style={styles.posterPlaceholderText}>{movie.title[0]}</Text>
-            </View>
-          )}
-        </View>
-
         {/* Movie Info */}
         <View style={styles.infoContainer}>
           <Text style={styles.title}>{movie.title}</Text>
 
           <View style={styles.metaRow}>
-            <Text style={styles.year}>{movie.release_year}</Text>
-            {movie.director && (
+            {movie.release_year ? (
+              <Text style={styles.year}>{movie.release_year}</Text>
+            ) : null}
+            {movie.director ? (
               <>
                 <Text style={styles.metaDivider}>•</Text>
                 <Text style={styles.director}>{movie.director}</Text>
               </>
-            )}
-            {movie.runtime_minutes && (
+            ) : null}
+            {movie.runtime_minutes ? (
               <>
                 <Text style={styles.metaDivider}>•</Text>
                 <Text style={styles.runtime}>{movie.runtime_minutes} min</Text>
               </>
-            )}
+            ) : null}
           </View>
 
-          {movie.genres.length > 0 && (
+          {movie.genres && movie.genres.length > 0 ? (
             <View style={styles.genresRow}>
               {movie.genres.slice(0, 3).map((genre, index) => (
                 <View key={index} style={styles.genreTag}>
@@ -236,19 +283,19 @@ export default function MovieDetailScreen() {
                 </View>
               ))}
             </View>
-          )}
+          ) : null}
 
-          {movie.synopsis && (
+          {movie.synopsis ? (
             <Text style={styles.synopsis}>{movie.synopsis}</Text>
-          )}
+          ) : null}
 
           {/* User's Ranking */}
-          {userRanking && (
+          {userRanking ? (
             <View style={styles.userRankingContainer}>
               <Text style={styles.userRankingLabel}>YOUR RANKING</Text>
               <Text style={styles.userRankingValue}>#{userRanking.rank_position}</Text>
             </View>
-          )}
+          ) : null}
 
           {/* Action Button */}
           <Pressable
@@ -264,7 +311,7 @@ export default function MovieDetailScreen() {
           </Pressable>
 
           {/* User's Review */}
-          {userReview && (
+          {userReview ? (
             <View style={styles.userReviewContainer}>
               <View style={styles.reviewHeader}>
                 <Text style={styles.reviewLabel}>YOUR REVIEW</Text>
@@ -279,13 +326,13 @@ export default function MovieDetailScreen() {
                   ))}
                 </View>
               </View>
-              {userReview.review_text && (
+              {userReview.review_text ? (
                 <Text style={styles.reviewText}>{userReview.review_text}</Text>
-              )}
+              ) : null}
             </View>
-          )}
+          ) : null}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 }
@@ -319,6 +366,44 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.stamp,
   },
+  headerImageContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+    backgroundColor: Colors.dust,
+    zIndex: 1,
+  },
+  imageWrapper: {
+    width: '100%',
+    height: '100%',
+  },
+  headerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  headerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.dust,
+  },
+  headerPlaceholderText: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes['5xl'],
+    color: Colors.textMuted,
+  },
+  headerGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 80,
+    backgroundColor: 'transparent',
+    // Gradient effect using shadow
+  },
   header: {
     position: 'absolute',
     top: 0,
@@ -335,58 +420,32 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.background,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   bookmarkButton: {
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.background,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   scrollView: {
     flex: 1,
+    zIndex: 2,
   },
   scrollContent: {
     paddingBottom: Spacing['3xl'],
   },
-  posterContainer: {
-    width: SCREEN_WIDTH,
-    height: POSTER_HEIGHT,
-    backgroundColor: Colors.dust,
-  },
-  poster: {
-    width: '100%',
-    height: '100%',
-  },
-  posterPlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.dust,
-  },
-  posterPlaceholderText: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes['5xl'],
-    color: Colors.textMuted,
-  },
   infoContainer: {
+    backgroundColor: Colors.background,
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.xl,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    marginTop: -Spacing.lg,
   },
   title: {
     fontFamily: Fonts.serifBold,
@@ -397,6 +456,7 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     marginBottom: Spacing.md,
   },
   year: {

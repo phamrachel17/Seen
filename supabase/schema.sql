@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS public.movies (
   synopsis TEXT,
   popularity_score NUMERIC,
   runtime_minutes INTEGER,
+  collection_id INTEGER, -- TMDB collection ID (franchise)
+  collection_name TEXT,  -- e.g., "The Dark Knight Collection"
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -107,15 +109,15 @@ CREATE POLICY "Users can update own profile" ON public.users
 CREATE POLICY "Users can insert own profile" ON public.users
   FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Movies policies (public read, no direct writes - managed via functions)
+-- Movies policies (public read, authenticated users can cache movies)
 CREATE POLICY "Anyone can view movies" ON public.movies
   FOR SELECT USING (true);
 
-CREATE POLICY "Service role can insert movies" ON public.movies
-  FOR INSERT WITH CHECK (true);
+CREATE POLICY "Authenticated users can insert movies" ON public.movies
+  FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
-CREATE POLICY "Service role can update movies" ON public.movies
-  FOR UPDATE USING (true);
+CREATE POLICY "Authenticated users can update movies" ON public.movies
+  FOR UPDATE USING (auth.role() = 'authenticated');
 
 -- Reviews policies
 CREATE POLICY "Users can view public reviews" ON public.reviews
@@ -156,3 +158,22 @@ CREATE POLICY "Users can update friendships they're part of" ON public.friendshi
 
 CREATE POLICY "Users can delete own friendship requests" ON public.friendships
   FOR DELETE USING (auth.uid() = user_id);
+
+-- Trigger to auto-create user profile on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, email, username)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1))
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();

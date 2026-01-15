@@ -21,6 +21,13 @@ export const ImageSize = {
 } as const;
 
 // TMDB API response types
+interface TMDBCollection {
+  id: number;
+  name: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+}
+
 interface TMDBMovie {
   id: number;
   title: string;
@@ -33,6 +40,7 @@ interface TMDBMovie {
   popularity: number;
   runtime?: number;
   vote_average: number;
+  belongs_to_collection?: TMDBCollection | null;
 }
 
 interface TMDBCredits {
@@ -65,6 +73,7 @@ export function getImageUrl(
 
 // Transform TMDB movie to our Movie type
 function transformMovie(tmdbMovie: TMDBMovie, director?: string): Movie {
+  const collection = tmdbMovie.belongs_to_collection;
   return {
     id: tmdbMovie.id,
     title: tmdbMovie.title,
@@ -78,6 +87,8 @@ function transformMovie(tmdbMovie: TMDBMovie, director?: string): Movie {
     synopsis: tmdbMovie.overview,
     popularity_score: tmdbMovie.popularity,
     runtime_minutes: tmdbMovie.runtime,
+    collection_id: collection?.id,
+    collection_name: collection?.name,
   };
 }
 
