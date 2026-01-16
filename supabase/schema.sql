@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS public.users (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Ensure case-insensitive username uniqueness
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
+  ON public.users (LOWER(username));
+
 -- Movies cache table (stores TMDB movie data locally)
 CREATE TABLE IF NOT EXISTS public.movies (
   id INTEGER PRIMARY KEY, -- TMDB movie ID

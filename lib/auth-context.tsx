@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { normalizeEmail } from './validation';
 
 interface AuthContextType {
   session: Session | null;
@@ -36,38 +37,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    // Normalize email to match how it was stored during sign-up
+    const normalizedEmail = normalizeEmail(email);
+
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: normalizedEmail,
       password,
     });
     return { error: error as Error | null };
   };
 
   const signUp = async (email: string, password: string, username: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
+    // Normalize email to prevent Gmail duplicates (dots, aliases)
+    const normalizedEmail = normalizeEmail(email);
+    const trimmedUsername = username.trim();
+
+    const { error } = await supabase.auth.signUp({
+      email: normalizedEmail,
       password,
       options: {
         data: {
-          username,
+          username: trimmedUsername,
         },
       },
     });
 
-    if (!error && data.user) {
-      // Create user profile in the users table
-      const { error: profileError } = await supabase
-        .from('users')
-        .insert({
-          id: data.user.id,
-          email: data.user.email,
-          username,
-        });
-
-      if (profileError) {
-        console.error('Error creating user profile:', profileError);
-      }
-    }
+    // The database trigger handle_new_user() automatically creates
+    // the user profile in public.users table. Do NOT manually insert.
 
     return { error: error as Error | null };
   };

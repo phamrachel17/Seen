@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { checkUsernameAvailable, checkEmailAvailable } from '@/lib/validation';
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -27,34 +28,71 @@ export default function SignUpScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const handleSignUp = async () => {
-    if (!username || !email || !password || !confirmPassword) {
-      setError('Please fill in all fields');
+    // Clear all errors
+    setUsernameError(null);
+    setEmailError(null);
+    setPasswordError(null);
+    setGeneralError(null);
+
+    // Trim inputs
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+
+    // Basic validation
+    if (!trimmedUsername || !trimmedEmail || !password || !confirmPassword) {
+      setGeneralError('Please fill in all fields');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setPasswordError('Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setPasswordError('Password must be at least 6 characters');
       return;
     }
 
     setLoading(true);
-    setError(null);
 
-    const { error: signUpError } = await signUp(email, password, username);
+    // Pre-flight duplicate checking (in parallel)
+    const [isUsernameAvailable, isEmailAvailable] = await Promise.all([
+      checkUsernameAvailable(trimmedUsername),
+      checkEmailAvailable(trimmedEmail),
+    ]);
+
+    let hasErrors = false;
+
+    if (!isUsernameAvailable) {
+      setUsernameError('This username is already taken');
+      hasErrors = true;
+    }
+
+    if (!isEmailAvailable) {
+      setEmailError('An account with this email already exists');
+      hasErrors = true;
+    }
+
+    if (hasErrors) {
+      setLoading(false);
+      return; // Preserve input, don't clear fields
+    }
+
+    // Call signUp (email normalization happens in signUp function)
+    const { error: signUpError } = await signUp(trimmedEmail, password, trimmedUsername);
 
     setLoading(false);
 
     if (signUpError) {
-      setError(signUpError.message);
+      setGeneralError(signUpError.message);
     } else {
       setSuccess(true);
     }
@@ -102,28 +140,36 @@ export default function SignUpScreen() {
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Username</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, usernameError && styles.inputError]}
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(text) => {
+                  setUsername(text);
+                  setUsernameError(null); // Clear error on change
+                }}
                 placeholder="filmcritic42"
                 placeholderTextColor={Colors.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+              {usernameError && <Text style={styles.fieldErrorText}>{usernameError}</Text>}
             </View>
 
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Email</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, emailError && styles.inputError]}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  setEmailError(null); // Clear error on change
+                }}
                 placeholder="your@email.com"
                 placeholderTextColor={Colors.textMuted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+              {emailError && <Text style={styles.fieldErrorText}>{emailError}</Text>}
             </View>
 
             <View style={styles.inputContainer}>
@@ -172,9 +218,10 @@ export default function SignUpScreen() {
                   />
                 </Pressable>
               </View>
+              {passwordError && <Text style={styles.fieldErrorText}>{passwordError}</Text>}
             </View>
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {generalError && <Text style={styles.errorText}>{generalError}</Text>}
 
             <Pressable
               style={({ pressed }) => [
@@ -277,6 +324,16 @@ const styles = StyleSheet.create({
   },
   eyeButton: {
     padding: Spacing.sm,
+  },
+  inputError: {
+    borderBottomColor: Colors.error,
+    borderBottomWidth: 2,
+  },
+  fieldErrorText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.error,
+    marginTop: Spacing.xs,
   },
   errorText: {
     fontFamily: Fonts.sans,
