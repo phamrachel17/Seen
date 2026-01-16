@@ -90,7 +90,7 @@ export default function RankingsScreen() {
         reviewsMap.set(review.movie_id, review.star_rating);
       }
 
-      // Combine and sort
+      // Combine data - sorted by rank_position (already from DB)
       const rankedMovies: RankedMovie[] = rankingsData
         .filter((item: any) => item.movies)
         .map((item: any) => ({
@@ -106,14 +106,6 @@ export default function RankingsScreen() {
           },
           star_rating: reviewsMap.get(item.movie_id) || 0,
         }));
-
-      // Sort by star rating (desc) then by rank position (asc)
-      rankedMovies.sort((a, b) => {
-        if (b.star_rating !== a.star_rating) {
-          return b.star_rating - a.star_rating;
-        }
-        return a.ranking.rank_position - b.ranking.rank_position;
-      });
 
       setRankings(rankedMovies);
     } finally {
@@ -137,23 +129,6 @@ export default function RankingsScreen() {
 
   const navigateToMovie = (movieId: number) => {
     router.push(`/movie/${movieId}`);
-  };
-
-  // Group rankings by star rating for tier separators
-  const groupedRankings: { rating: number; movies: RankedMovie[] }[] = [];
-  let currentRating = -1;
-
-  rankings.forEach((movie) => {
-    if (movie.star_rating !== currentRating) {
-      currentRating = movie.star_rating;
-      groupedRankings.push({ rating: currentRating, movies: [] });
-    }
-    groupedRankings[groupedRankings.length - 1].movies.push(movie);
-  });
-
-  // Calculate position within tier
-  const getTierPosition = (movie: RankedMovie, tierMovies: RankedMovie[]): number => {
-    return tierMovies.findIndex((m) => m.id === movie.id) + 1;
   };
 
   return (
@@ -193,74 +168,61 @@ export default function RankingsScreen() {
           </View>
         ) : (
           <View style={styles.rankingsList}>
-            {groupedRankings.map((group) => (
-              <View key={group.rating}>
-                {/* Tier Header */}
-                <View style={styles.tierHeader}>
-                  <StarDisplay rating={group.rating} size={14} />
-                  <Text style={styles.tierLabel}>
-                    {group.movies.length} {group.movies.length === 1 ? 'film' : 'films'}
+            {rankings.map((movie, index) => (
+              <Pressable
+                key={movie.id}
+                style={({ pressed }) => [
+                  styles.rankItem,
+                  pressed && styles.itemPressed,
+                ]}
+                onPress={() => navigateToMovie(movie.id)}
+              >
+                {/* Rank Number */}
+                <View style={styles.rankNumberContainer}>
+                  <Text style={[
+                    styles.rankNumber,
+                    index < 3 && styles.topRankNumber,
+                  ]}>
+                    {index + 1}
                   </Text>
                 </View>
 
-                {/* Movies in this tier */}
-                {group.movies.map((movie) => (
-                  <Pressable
-                    key={movie.id}
-                    style={({ pressed }) => [
-                      styles.rankItem,
-                      pressed && styles.itemPressed,
-                    ]}
-                    onPress={() => navigateToMovie(movie.id)}
-                  >
-                    {/* Tier Position */}
-                    <View style={styles.rankNumberContainer}>
-                      <Text style={[
-                        styles.rankNumber,
-                        getTierPosition(movie, group.movies) <= 3 && styles.topRankNumber,
-                      ]}>
-                        {getTierPosition(movie, group.movies)}
-                      </Text>
-                    </View>
+                {/* Poster */}
+                {movie.poster_url ? (
+                  <Image
+                    source={{ uri: movie.poster_url }}
+                    style={styles.poster}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={[styles.poster, styles.posterPlaceholder]}>
+                    <Text style={styles.placeholderLetter}>{movie.title[0]}</Text>
+                  </View>
+                )}
 
-                    {/* Poster */}
-                    {movie.poster_url ? (
-                      <Image
-                        source={{ uri: movie.poster_url }}
-                        style={styles.poster}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <View style={[styles.poster, styles.posterPlaceholder]}>
-                        <Text style={styles.placeholderLetter}>{movie.title[0]}</Text>
-                      </View>
-                    )}
+                {/* Movie Info */}
+                <View style={styles.movieInfo}>
+                  <Text style={styles.movieTitle} numberOfLines={2}>
+                    {movie.title}
+                  </Text>
+                  <Text style={styles.movieMeta}>
+                    {movie.release_year}
+                    {movie.director ? ` • ${movie.director}` : ''}
+                  </Text>
+                </View>
 
-                    {/* Movie Info */}
-                    <View style={styles.movieInfo}>
-                      <Text style={styles.movieTitle} numberOfLines={2}>
-                        {movie.title}
-                      </Text>
-                      <Text style={styles.movieMeta}>
-                        {movie.release_year}
-                        {movie.director ? ` • ${movie.director}` : ''}
-                      </Text>
-                    </View>
+                {/* Star Rating */}
+                <View style={styles.movieStars}>
+                  <StarDisplay rating={movie.star_rating} size={10} />
+                </View>
 
-                    {/* Star Rating */}
-                    <View style={styles.movieStars}>
-                      <StarDisplay rating={movie.star_rating} size={10} />
-                    </View>
-
-                    {/* Chevron */}
-                    <IconSymbol
-                      name="chevron.right"
-                      size={16}
-                      color={Colors.textMuted}
-                    />
-                  </Pressable>
-                ))}
-              </View>
+                {/* Chevron */}
+                <IconSymbol
+                  name="chevron.right"
+                  size={16}
+                  color={Colors.textMuted}
+                />
+              </Pressable>
             ))}
           </View>
         )}
@@ -330,23 +292,6 @@ const styles = StyleSheet.create({
   },
   rankingsList: {
     paddingTop: Spacing.sm,
-  },
-  tierHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.cardBackground,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    marginTop: Spacing.sm,
-  },
-  tierLabel: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-    letterSpacing: 1,
   },
   rankItem: {
     flexDirection: 'row',

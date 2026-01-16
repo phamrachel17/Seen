@@ -1,23 +1,30 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  Alert,
+  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
-import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { getFollowCounts } from '@/lib/follows';
-import { Movie, Review, User } from '@/types';
+import {
+  getUserProfile,
+  getUserStats,
+  getUserRecentReviews,
+  getFollowCounts,
+  checkIfFollowing,
+  followUser,
+  unfollowUser,
+} from '@/lib/follows';
+import { User, Movie, Review } from '@/types';
 
 interface ReviewWithMovie extends Review {
   movies: Movie;
@@ -29,100 +36,60 @@ interface UserStats {
   rankingsCount: number;
 }
 
-export default function ProfileScreen() {
-  const insets = useSafeAreaInsets();
+export default function UserProfileScreen() {
   const router = useRouter();
-  const { signOut, user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { user: currentUser } = useAuth();
+  const { id: userId } = useLocalSearchParams<{ id: string }>();
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [profileData, setProfileData] = useState<Pick<
+    User,
+    'id' | 'username' | 'display_name' | 'bio' | 'profile_image_url'
+  > | null>(null);
   const [stats, setStats] = useState<UserStats>({
     totalFilms: 0,
     totalMinutes: 0,
     rankingsCount: 0,
   });
-  const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [profileData, setProfileData] = useState<Pick<User, 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
+  const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
+
+  const isOwnProfile = currentUser?.id === userId;
 
   const loadUserData = useCallback(async () => {
-    if (!user) return;
+    if (!userId || !currentUser) return;
 
     try {
-      // Load profile data
-      const { data: profile } = await supabase
-        .from('users')
-        .select('profile_image_url, display_name, bio')
-        .eq('id', user.id)
-        .single();
+      const [profile, userStats, counts, reviews, followingStatus] =
+        await Promise.all([
+          getUserProfile(userId),
+          getUserStats(userId),
+          getFollowCounts(userId),
+          getUserRecentReviews(userId, currentUser.id, 6),
+          checkIfFollowing(currentUser.id, userId),
+        ]);
 
       if (profile) {
         setProfileData(profile);
       }
-
-      // Load reviews count and total watch time
-      const { data: reviews, error: reviewsError } = await supabase
-        .from('reviews')
-        .select(`
-          id,
-          movies (runtime_minutes)
-        `)
-        .eq('user_id', user.id);
-
-      if (!reviewsError && reviews) {
-        const totalMinutes = reviews.reduce((acc, r) => {
-          const movie = r.movies as { runtime_minutes: number } | null;
-          return acc + (movie?.runtime_minutes || 0);
-        }, 0);
-
-        setStats((prev) => ({
-          ...prev,
-          totalFilms: reviews.length,
-          totalMinutes,
-        }));
-      }
-
-      // Load rankings count
-      const { count: rankingsCount } = await supabase
-        .from('rankings')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-
-      setStats((prev) => ({
-        ...prev,
-        rankingsCount: rankingsCount || 0,
-      }));
-
-      // Load recent reviews
-      const { data: recentData, error: recentError } = await supabase
-        .from('reviews')
-        .select(`
-          *,
-          movies (*)
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(6);
-
-      if (!recentError && recentData) {
-        const reviewsWithMovies = recentData.filter(
-          (item: ReviewWithMovie) => item.movies
-        ) as ReviewWithMovie[];
-        setRecentReviews(reviewsWithMovies);
-      }
-
-      // Load follow counts
-      const counts = await getFollowCounts(user.id);
+      setStats(userStats);
       setFollowCounts(counts);
+      setRecentReviews(reviews);
+      setIsFollowing(followingStatus);
     } catch (error) {
       console.error('Error loading user data:', error);
+    } finally {
+      setIsLoading(false);
     }
-  }, [user]);
+  }, [userId, currentUser]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadUserData();
-    }, [loadUserData])
-  );
+  useEffect(() => {
+    loadUserData();
+  }, [loadUserData]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -130,15 +97,40 @@ export default function ProfileScreen() {
     setIsRefreshing(false);
   };
 
-  const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: signOut },
-      ]
-    );
+  const handleFollowPress = async () => {
+    if (!currentUser || !userId || isFollowLoading) return;
+
+    // Optimistic update
+    setIsFollowing(!isFollowing);
+    setFollowCounts((prev) => ({
+      ...prev,
+      followers: isFollowing ? prev.followers - 1 : prev.followers + 1,
+    }));
+    setIsFollowLoading(true);
+
+    try {
+      const success = isFollowing
+        ? await unfollowUser(currentUser.id, userId)
+        : await followUser(currentUser.id, userId);
+
+      if (!success) {
+        // Revert on failure
+        setIsFollowing(isFollowing);
+        setFollowCounts((prev) => ({
+          ...prev,
+          followers: isFollowing ? prev.followers + 1 : prev.followers - 1,
+        }));
+      }
+    } catch (error) {
+      // Revert on error
+      setIsFollowing(isFollowing);
+      setFollowCounts((prev) => ({
+        ...prev,
+        followers: isFollowing ? prev.followers + 1 : prev.followers - 1,
+      }));
+    } finally {
+      setIsFollowLoading(false);
+    }
   };
 
   const formatWatchTime = (minutes: number) => {
@@ -154,19 +146,89 @@ export default function ProfileScreen() {
     router.push(`/movie/${movieId}`);
   };
 
+  const handleBack = () => {
+    router.back();
+  };
+
+  // Redirect to own profile tab if viewing own profile
+  useEffect(() => {
+    if (isOwnProfile) {
+      router.replace('/(tabs)/profile');
+    }
+  }, [isOwnProfile, router]);
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={Colors.stamp} />
+      </View>
+    );
+  }
+
+  if (!profileData) {
+    return (
+      <View style={[styles.container, styles.errorContainer]}>
+        <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
+          <Pressable style={styles.backButton} onPress={handleBack}>
+            <IconSymbol name="chevron.left" size={20} color={Colors.text} />
+          </Pressable>
+          <View style={styles.headerSpacer} />
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.errorContent}>
+          <Text style={styles.errorText}>User not found</Text>
+          <Pressable style={styles.goBackButton} onPress={handleBack}>
+            <Text style={styles.goBackButtonText}>Go back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.iconButton}>
-          <IconSymbol name="ellipsis" size={22} color={Colors.text} />
+        <Pressable style={styles.backButton} onPress={handleBack}>
+          <IconSymbol name="chevron.left" size={20} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Seen</Text>
-        <Pressable style={styles.iconButton} onPress={handleSignOut}>
-          <View style={styles.settingsIcon}>
-            <IconSymbol name="rectangle.portrait.and.arrow.right" size={18} color={Colors.textMuted} />
-          </View>
-        </Pressable>
+        <Text style={styles.headerTitle}>
+          @{profileData.username}
+        </Text>
+        {!isOwnProfile ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.followHeaderButton,
+              isFollowing
+                ? styles.followingHeaderButton
+                : styles.notFollowingHeaderButton,
+              pressed && styles.buttonPressed,
+              isFollowLoading && styles.buttonDisabled,
+            ]}
+            onPress={handleFollowPress}
+            disabled={isFollowLoading}
+          >
+            {isFollowLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={isFollowing ? Colors.stamp : Colors.paper}
+              />
+            ) : (
+              <Text
+                style={[
+                  styles.followHeaderButtonText,
+                  isFollowing
+                    ? styles.followingHeaderButtonText
+                    : styles.notFollowingHeaderButtonText,
+                ]}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            )}
+          </Pressable>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
       </View>
 
       <ScrollView
@@ -184,28 +246,23 @@ export default function ProfileScreen() {
         {/* Profile Section - Horizontal Layout */}
         <View style={styles.profileSection}>
           {/* Left: Poster */}
-          <Pressable
-            style={styles.avatarWrapper}
-            onPress={() => router.push('/edit-profile')}
-          >
+          <View style={styles.avatarWrapper}>
             <ProfileAvatar
-              imageUrl={profileData?.profile_image_url}
-              username={user?.user_metadata?.username || 'User'}
+              imageUrl={profileData.profile_image_url}
+              username={profileData.username}
               size="large"
               variant="poster"
             />
-            <View style={styles.editBadge}>
-              <IconSymbol name="pencil" size={12} color={Colors.paper} />
-            </View>
-          </Pressable>
+          </View>
 
           {/* Right: Name, Bio, Follow Stats */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
-              {profileData?.display_name?.toUpperCase() || user?.user_metadata?.username?.toUpperCase() || 'CINEPHILE'}
+              {profileData.display_name?.toUpperCase() ||
+                profileData.username.toUpperCase()}
             </Text>
             <Text style={styles.profileBio}>
-              {profileData?.bio || 'Film Enthusiast'}
+              {profileData.bio || 'Film Enthusiast'}
             </Text>
             <View style={styles.followStats}>
               <Pressable
@@ -216,7 +273,7 @@ export default function ProfileScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/follow-list',
-                    params: { type: 'following', userId: user?.id },
+                    params: { type: 'following', userId },
                   })
                 }
               >
@@ -231,7 +288,7 @@ export default function ProfileScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/follow-list',
-                    params: { type: 'followers', userId: user?.id },
+                    params: { type: 'followers', userId },
                   })
                 }
               >
@@ -264,15 +321,10 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Recent Archives */}
+        {/* Recent Activity */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
-            {recentReviews.length > 0 && (
-              <Pressable onPress={() => router.push('/(tabs)')}>
-                <Text style={styles.viewAll}>VIEW ALL</Text>
-              </Pressable>
-            )}
           </View>
 
           {recentReviews.length > 0 ? (
@@ -309,7 +361,11 @@ export default function ProfileScreen() {
                         key={star}
                         name={star <= review.star_rating ? 'star.fill' : 'star'}
                         size={10}
-                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
+                        color={
+                          star <= review.star_rating
+                            ? Colors.starFilled
+                            : Colors.starEmpty
+                        }
                       />
                     ))}
                   </View>
@@ -319,23 +375,10 @@ export default function ProfileScreen() {
           ) : (
             <View style={styles.placeholder}>
               <Text style={styles.placeholderText}>
-                Your recent activity will appear here
+                No public reviews yet
               </Text>
             </View>
           )}
-        </View>
-
-        {/* Sign Out Button */}
-        <View style={styles.signOutSection}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.signOutButton,
-              pressed && styles.signOutButtonPressed,
-            ]}
-            onPress={handleSignOut}
-          >
-            <Text style={styles.signOutText}>Sign Out</Text>
-          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -347,6 +390,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+  },
+  errorContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  errorText: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.xl,
+    color: Colors.text,
+    marginBottom: Spacing.lg,
+  },
+  goBackButton: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+  },
+  goBackButtonText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -354,21 +425,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
   },
-  headerTitle: {
-    fontFamily: Fonts.serifBoldItalic,
-    fontSize: FontSizes['3xl'],
-    color: Colors.stamp,
-  },
-  iconButton: {
-    padding: Spacing.xs,
-  },
-  settingsIcon: {
-    width: 32,
-    height: 32,
+  backButton: {
+    width: 36,
+    height: 36,
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.dust,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.textMuted,
+  },
+  headerSpacer: {
+    width: 36,
+  },
+  followHeaderButton: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    minWidth: 90,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 32,
+  },
+  notFollowingHeaderButton: {
+    backgroundColor: Colors.stamp,
+  },
+  followingHeaderButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  buttonPressed: {
+    opacity: 0.8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  followHeaderButtonText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+  },
+  notFollowingHeaderButtonText: {
+    color: Colors.paper,
+  },
+  followingHeaderButtonText: {
+    color: Colors.text,
   },
   scrollView: {
     flex: 1,
@@ -384,19 +488,6 @@ const styles = StyleSheet.create({
   },
   avatarWrapper: {
     position: 'relative',
-  },
-  editBadge: {
-    position: 'absolute',
-    bottom: Spacing.xs,
-    right: Spacing.xs,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.stamp,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.background,
   },
   profileInfo: {
     flex: 1,
@@ -483,11 +574,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     letterSpacing: 1,
   },
-  viewAll: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.xs,
-    color: Colors.navy,
-  },
   recentScroll: {
     paddingHorizontal: Spacing.xl,
     gap: Spacing.md,
@@ -529,24 +615,5 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
-  },
-  signOutSection: {
-    marginTop: Spacing['2xl'],
-    paddingHorizontal: Spacing.xl,
-  },
-  signOutButton: {
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.sm,
-  },
-  signOutButtonPressed: {
-    opacity: 0.7,
-  },
-  signOutText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
   },
 });

@@ -163,8 +163,8 @@ export default function RankingModal() {
                 <StarRating rating={starRating} size={16} />
                 <Text style={styles.completionSubtitle}>
                   {tierMovieCount === 0
-                    ? `First in your ${starRating}-star films`
-                    : `#${rankingState.tierPosition} of ${tierMovieCount + 1} ${starRating}-star films`}
+                    ? `Your first ${starRating}-star film!`
+                    : `Ranked #${rankingState.tierPosition} of ${tierMovieCount + 1} ${starRating}-star films`}
                 </Text>
               </View>
             </>
@@ -201,11 +201,10 @@ export default function RankingModal() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Tier Context */}
+      {/* Context */}
       <View style={styles.tierContextHeader}>
-        <StarRating rating={starRating} size={14} />
         <Text style={styles.tierContextText}>
-          Ranking among your {starRating}-star films
+          Ranking among your {rankingState?.tierMovies.length || 0} {starRating}-star films
         </Text>
       </View>
 

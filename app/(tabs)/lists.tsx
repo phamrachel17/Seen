@@ -109,7 +109,8 @@ export default function ListsScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <View>
+        <Text style={styles.seenTitle}>Seen</Text>
+        <View style={styles.archiveInfo}>
           <Text style={styles.archiveLabel}>
             ARCHIVE NO. {String(rankingsCount).padStart(3, '0')}
           </Text>
@@ -217,6 +218,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.lg,
+  },
+  seenTitle: {
+    fontFamily: Fonts.serifBoldItalic,
+    fontSize: FontSizes['3xl'],
+    color: Colors.stamp,
+  },
+  archiveInfo: {
+    alignItems: 'flex-end',
   },
   archiveLabel: {
     fontFamily: Fonts.sans,

@@ -7,21 +7,35 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { MovieGrid } from '@/components/movie-card';
+import { UserListItem } from '@/components/user-list-item';
 import { searchMovies, getTrendingMovies } from '@/lib/tmdb';
-import { Movie } from '@/types';
+import { searchUsers, followUser, unfollowUser } from '@/lib/follows';
+import { useAuth } from '@/lib/auth-context';
+import { Movie, UserSearchResult } from '@/types';
+
+type SearchMode = 'movies' | 'people';
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { user } = useAuth();
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>('movies');
   const [searchResults, setSearchResults] = useState<Movie[]>([]);
+  const [userResults, setUserResults] = useState<UserSearchResult[]>([]);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [loadingFollowIds, setLoadingFollowIds] = useState<Set<string>>(new Set());
 
   // Load trending movies on mount
   useEffect(() => {
@@ -44,14 +58,24 @@ export default function DiscoverScreen() {
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
+      setUserResults([]);
       return;
     }
 
     const timeoutId = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const { movies } = await searchMovies(searchQuery);
-        setSearchResults(movies);
+        if (searchMode === 'movies') {
+          const { movies } = await searchMovies(searchQuery);
+          setSearchResults(movies);
+        } else {
+          if (!user) return;
+          const users = await searchUsers(searchQuery, user.id);
+          setUserResults(users);
+          setFollowingIds(
+            new Set(users.filter((u) => u.is_following).map((u) => u.id))
+          );
+        }
       } catch (error) {
         console.error('Search error:', error);
       } finally {
@@ -60,12 +84,72 @@ export default function DiscoverScreen() {
     }, 400);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, searchMode, user]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
     setSearchResults([]);
+    setUserResults([]);
   }, []);
+
+  const handleFollowPress = async (targetUserId: string) => {
+    if (!user || loadingFollowIds.has(targetUserId)) return;
+
+    const isCurrentlyFollowing = followingIds.has(targetUserId);
+
+    // Optimistic update
+    setFollowingIds((prev) => {
+      const next = new Set(prev);
+      if (isCurrentlyFollowing) {
+        next.delete(targetUserId);
+      } else {
+        next.add(targetUserId);
+      }
+      return next;
+    });
+
+    setLoadingFollowIds((prev) => new Set(prev).add(targetUserId));
+
+    try {
+      const success = isCurrentlyFollowing
+        ? await unfollowUser(user.id, targetUserId)
+        : await followUser(user.id, targetUserId);
+
+      if (!success) {
+        // Revert on failure
+        setFollowingIds((prev) => {
+          const next = new Set(prev);
+          if (isCurrentlyFollowing) {
+            next.add(targetUserId);
+          } else {
+            next.delete(targetUserId);
+          }
+          return next;
+        });
+      }
+    } catch (error) {
+      // Revert on error
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        if (isCurrentlyFollowing) {
+          next.add(targetUserId);
+        } else {
+          next.delete(targetUserId);
+        }
+        return next;
+      });
+    } finally {
+      setLoadingFollowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetUserId);
+        return next;
+      });
+    }
+  };
+
+  const handleUserPress = (userId: string) => {
+    router.push(`/user/${userId}`);
+  };
 
   const isShowingSearch = searchQuery.trim().length > 0;
 
@@ -87,7 +171,7 @@ export default function DiscoverScreen() {
           <IconSymbol name="magnifyingglass" size={18} color={Colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search movies..."
+            placeholder={searchMode === 'movies' ? 'Search movies...' : 'Search people...'}
             placeholderTextColor={Colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -100,6 +184,42 @@ export default function DiscoverScreen() {
               <IconSymbol name="xmark" size={18} color={Colors.textMuted} />
             </Pressable>
           )}
+        </View>
+
+        {/* Search Mode Toggle */}
+        <View style={styles.searchModeToggle}>
+          <Pressable
+            style={[
+              styles.modeButton,
+              searchMode === 'movies' && styles.modeButtonActive,
+            ]}
+            onPress={() => setSearchMode('movies')}
+          >
+            <Text
+              style={[
+                styles.modeButtonText,
+                searchMode === 'movies' && styles.modeButtonTextActive,
+              ]}
+            >
+              Movies
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.modeButton,
+              searchMode === 'people' && styles.modeButtonActive,
+            ]}
+            onPress={() => setSearchMode('people')}
+          >
+            <Text
+              style={[
+                styles.modeButtonText,
+                searchMode === 'people' && styles.modeButtonTextActive,
+              ]}
+            >
+              People
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -117,15 +237,41 @@ export default function DiscoverScreen() {
               {isSearching && <ActivityIndicator size="small" color={Colors.stamp} />}
             </View>
 
-            {searchResults.length > 0 ? (
-              <MovieGrid movies={searchResults} columns={3} />
-            ) : !isSearching ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>
-                  No movies found for &quot;{searchQuery}&quot;
-                </Text>
-              </View>
-            ) : null}
+            {searchMode === 'movies' ? (
+              // Movie search results
+              searchResults.length > 0 ? (
+                <MovieGrid movies={searchResults} columns={3} />
+              ) : !isSearching ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>
+                    No movies found for &quot;{searchQuery}&quot;
+                  </Text>
+                </View>
+              ) : null
+            ) : (
+              // People search results
+              userResults.length > 0 ? (
+                <View style={styles.userResultsList}>
+                  {userResults.map((userItem) => (
+                    <UserListItem
+                      key={userItem.id}
+                      user={userItem}
+                      currentUserId={user?.id || ''}
+                      isFollowing={followingIds.has(userItem.id)}
+                      isLoading={loadingFollowIds.has(userItem.id)}
+                      onFollowPress={() => handleFollowPress(userItem.id)}
+                      onUserPress={() => handleUserPress(userItem.id)}
+                    />
+                  ))}
+                </View>
+              ) : !isSearching ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>
+                    No users found for &quot;{searchQuery}&quot;
+                  </Text>
+                </View>
+              ) : null
+            )}
           </>
         ) : (
           <>
@@ -182,6 +328,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.lg,
+    gap: Spacing.md,
   },
   searchBar: {
     flexDirection: 'row',
@@ -237,5 +384,31 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
+  },
+  searchModeToggle: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  modeButton: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modeButtonActive: {
+    backgroundColor: Colors.stamp,
+    borderColor: Colors.stamp,
+  },
+  modeButtonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  modeButtonTextActive: {
+    color: Colors.paper,
+  },
+  userResultsList: {
+    marginHorizontal: -Spacing.xl,
   },
 });

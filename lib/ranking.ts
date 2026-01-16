@@ -185,26 +185,30 @@ export function initializeRankingState(
 }
 
 /**
- * Initialize ranking state with star rating tier awareness
+ * Initialize ranking state - compares ONLY against movies with same star rating
+ * Uses binary search on RANK-SORTED movies for correct monotonic narrowing
  */
 export function initializeRankingStateWithTier(
   newMovie: Movie,
   starRating: number,
   allRankings: RankedMovie[]
 ): RankingState {
-  // Filter to movies in the same star rating tier
+  // Filter to only movies with the SAME star rating (tier-based comparison)
   const tierMovies = allRankings.filter(m => m.star_rating === starRating);
 
-  // Sort tier movies by relevance to the new movie
-  const sortedTierMovies = sortByRelevance(tierMovies, newMovie);
+  // CRITICAL: Sort by rank_position for binary search correctness
+  // This ensures comparisons monotonically narrow toward insertion point
+  const rankSortedMovies = [...tierMovies].sort(
+    (a, b) => a.ranking.rank_position - b.ranking.rank_position
+  );
 
-  const n = sortedTierMovies.length;
+  const n = rankSortedMovies.length;
   const maxComparisons = n === 0 ? 0 : Math.ceil(Math.log2(n + 1));
 
   return {
     newMovie,
     starRating,
-    tierMovies: sortedTierMovies,
+    tierMovies: rankSortedMovies,  // Sorted by rank_position for binary search
     allRankings,
     low: 0,
     high: n,
@@ -212,7 +216,7 @@ export function initializeRankingStateWithTier(
     comparisons: 0,
     maxComparisons,
     isComplete: n === 0,
-    tierPosition: n === 0 ? 1 : -1,
+    tierPosition: n === 0 ? 1 : -1,  // Position within tier
     finalPosition: -1,
   };
 }
@@ -262,215 +266,133 @@ export function processComparison(state: RankingState, prefersNewMovie: boolean)
 }
 
 /**
- * Calculate global position based on star rating tiers
- * 5-star movies come first, then 4-star, etc.
- */
-function calculateGlobalPosition(
-  tierPosition: number,
-  starRating: number,
-  allRankings: RankedMovie[]
-): number {
-  // Count movies in higher-rated tiers
-  let position = 0;
-
-  for (let rating = 5; rating > starRating; rating--) {
-    position += allRankings.filter(m => m.star_rating === rating).length;
-  }
-
-  // Add position within current tier
-  position += tierPosition;
-
-  return position;
-}
-
-/**
- * Save the ranking to database with tier-aware positioning
+ * Save the ranking to database using tier-based positioning
+ *
+ * Global position is calculated as:
+ * (count of movies in higher star tiers) + (position within current tier)
+ *
+ * This ensures 5-star movies always rank above 4-star, etc.
  */
 export async function saveRanking(
   userId: string,
   movie: Movie,
   tierPosition: number,
-  starRating?: number
+  starRating: number
 ): Promise<void> {
-  // Cache the movie with all attributes including collection data
-  await supabase.from('movies').upsert({
-    id: movie.id,
-    title: movie.title,
-    poster_url: movie.poster_url,
-    backdrop_url: movie.backdrop_url,
-    release_year: movie.release_year,
-    genres: movie.genres,
-    director: movie.director,
-    synopsis: movie.synopsis,
-    popularity_score: movie.popularity_score,
-    runtime_minutes: movie.runtime_minutes,
-    collection_id: movie.collection_id,
-    collection_name: movie.collection_name,
-    updated_at: new Date().toISOString(),
-  });
+  try {
+    // Cache the movie with all attributes
+    const { error: movieError } = await supabase.from('movies').upsert({
+      id: movie.id,
+      title: movie.title,
+      poster_url: movie.poster_url,
+      backdrop_url: movie.backdrop_url,
+      release_year: movie.release_year,
+      genres: movie.genres,
+      director: movie.director,
+      synopsis: movie.synopsis,
+      popularity_score: movie.popularity_score,
+      runtime_minutes: movie.runtime_minutes,
+      collection_id: movie.collection_id,
+      collection_name: movie.collection_name,
+      updated_at: new Date().toISOString(),
+    });
 
-  // Get all rankings with star ratings to calculate global positions
-  const allRankings = await getUserRankingsWithRatings(userId);
+    if (movieError) {
+      console.error('Error caching movie:', movieError);
+    }
 
-  // Get the star rating (from param or fetch from review)
-  let rating = starRating;
-  if (!rating) {
-    const { data: review } = await supabase
-      .from('reviews')
-      .select('star_rating')
+    // Check if movie already has a ranking
+    const { data: existingRanking } = await supabase
+      .from('rankings')
+      .select('id, rank_position')
       .eq('user_id', userId)
       .eq('movie_id', movie.id)
       .single();
-    rating = review?.star_rating || 3;
+
+    if (existingRanking) {
+      console.log('Movie already ranked at position:', existingRanking.rank_position);
+      return;
+    }
+
+    // Get all rankings with their star ratings to calculate global position
+    const allRankings = await getUserRankingsWithRatings(userId);
+
+    // Count movies in HIGHER star rating tiers (they come before this movie)
+    const moviesInHigherTiers = allRankings.filter(m => m.star_rating > starRating).length;
+
+    // Global position = higher tier count + position within tier
+    const globalPosition = moviesInHigherTiers + tierPosition;
+
+    // Shift existing rankings down to make room
+    const { data: toShift } = await supabase
+      .from('rankings')
+      .select('id, rank_position')
+      .eq('user_id', userId)
+      .gte('rank_position', globalPosition)
+      .order('rank_position', { ascending: false });
+
+    // Update positions from highest to lowest to avoid constraint violations
+    for (const ranking of toShift || []) {
+      await supabase
+        .from('rankings')
+        .update({ rank_position: ranking.rank_position + 1 })
+        .eq('id', ranking.id);
+    }
+
+    // Insert the new ranking
+    const { error: insertError } = await supabase.from('rankings').insert({
+      user_id: userId,
+      movie_id: movie.id,
+      rank_position: globalPosition,
+      elo_score: 1500,
+    });
+
+    if (insertError) {
+      console.error('Error inserting ranking:', insertError);
+      throw insertError;
+    }
+
+    console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition}`);
+  } catch (error) {
+    console.error('Error in saveRanking:', error);
+    throw error;
   }
+}
 
-  // Calculate global position
-  const globalPosition = calculateGlobalPosition(tierPosition, rating, allRankings);
-
-  // Check if movie already has a ranking
-  const { data: existingRanking } = await supabase
+/**
+ * Remove a ranking and shift positions to close gap
+ */
+export async function removeRanking(userId: string, movieId: number): Promise<void> {
+  // Get the ranking to delete
+  const { data: toDelete } = await supabase
     .from('rankings')
     .select('id, rank_position')
     .eq('user_id', userId)
-    .eq('movie_id', movie.id)
+    .eq('movie_id', movieId)
     .single();
 
-  if (existingRanking) {
-    // Remove the existing ranking first
-    await supabase.from('rankings').delete().eq('id', existingRanking.id);
-  }
+  if (!toDelete) return;
 
-  // Recalculate all positions based on star rating tiers
-  await recalculateAllPositions(userId, movie.id, tierPosition, rating);
-}
+  const deletedPosition = toDelete.rank_position;
 
-/**
- * Recalculate all ranking positions based on star rating tiers
- * This ensures 5-star movies always rank above 4-star, etc.
- */
-async function recalculateAllPositions(
-  userId: string,
-  newMovieId: number,
-  newTierPosition: number,
-  newStarRating: number
-): Promise<void> {
-  // Fetch all existing rankings
-  const { data: rankingsData } = await supabase
-    .from('rankings')
-    .select('id, movie_id, rank_position')
-    .eq('user_id', userId)
-    .order('rank_position', { ascending: true });
-
-  if (!rankingsData) return;
-
-  // Get movie IDs to fetch reviews
-  const existingMovieIds = rankingsData.map(r => r.movie_id);
-  const allMovieIds = [...existingMovieIds, newMovieId];
-
-  // Fetch reviews for star ratings
-  const { data: reviewsData } = await supabase
-    .from('reviews')
-    .select('movie_id, star_rating')
-    .eq('user_id', userId)
-    .in('movie_id', allMovieIds);
-
-  // Create map of movie_id -> star_rating
-  const reviewsMap = new Map<number, number>();
-  for (const review of reviewsData || []) {
-    reviewsMap.set(review.movie_id, review.star_rating);
-  }
-
-  // Group existing rankings by star rating
-  const byRating: Map<number, { id: string; movie_id: number }[]> = new Map();
-
-  for (const r of rankingsData) {
-    const rating = reviewsMap.get(r.movie_id) || 0;
-    if (!byRating.has(rating)) {
-      byRating.set(rating, []);
-    }
-    byRating.get(rating)!.push({ id: r.id, movie_id: r.movie_id });
-  }
-
-  // Add new movie's tier if it doesn't exist
-  if (!byRating.has(newStarRating)) {
-    byRating.set(newStarRating, []);
-  }
-
-  // Insert new ranking first
-  const { data: newRanking } = await supabase
-    .from('rankings')
-    .insert({
-      user_id: userId,
-      movie_id: newMovieId,
-      rank_position: 0,
-      elo_score: 1500,
-    })
-    .select('id')
-    .single();
-
-  if (newRanking) {
-    // Insert at correct tier position
-    const tier = byRating.get(newStarRating)!;
-    const insertIndex = Math.min(newTierPosition - 1, tier.length);
-    tier.splice(insertIndex, 0, { id: newRanking.id, movie_id: newMovieId });
-  }
-
-  // Batch update all positions
-  let globalPosition = 1;
-  const updates: { id: string; position: number }[] = [];
-
-  // Process ratings from 5 down to 1
-  for (let rating = 5; rating >= 1; rating--) {
-    const tierMovies = byRating.get(rating) || [];
-    for (const movie of tierMovies) {
-      updates.push({ id: movie.id, position: globalPosition });
-      globalPosition++;
-    }
-  }
-
-  // Execute updates (batched for performance)
-  for (const update of updates) {
-    await supabase
-      .from('rankings')
-      .update({
-        rank_position: update.position,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', update.id);
-  }
-}
-
-/**
- * Remove a ranking and recalculate positions
- */
-export async function removeRanking(userId: string, movieId: number): Promise<void> {
   // Delete the ranking
   await supabase
     .from('rankings')
     .delete()
+    .eq('id', toDelete.id);
+
+  // Shift rankings above the deleted position up
+  const { data: toShift } = await supabase
+    .from('rankings')
+    .select('id, rank_position')
     .eq('user_id', userId)
-    .eq('movie_id', movieId);
+    .gt('rank_position', deletedPosition)
+    .order('rank_position', { ascending: true });
 
-  // Recalculate all positions to close the gap
-  const rankings = await getUserRankingsWithRatings(userId);
-
-  let globalPosition = 1;
-
-  // Sort by star rating desc, then by current position
-  const sorted = rankings.sort((a, b) => {
-    if (b.star_rating !== a.star_rating) {
-      return b.star_rating - a.star_rating;
-    }
-    return a.ranking.rank_position - b.ranking.rank_position;
-  });
-
-  for (const ranking of sorted) {
-    if (ranking.ranking.rank_position !== globalPosition) {
-      await supabase
-        .from('rankings')
-        .update({ rank_position: globalPosition })
-        .eq('id', ranking.ranking.id);
-    }
-    globalPosition++;
+  for (const ranking of toShift || []) {
+    await supabase
+      .from('rankings')
+      .update({ rank_position: ranking.rank_position - 1 })
+      .eq('id', ranking.id);
   }
 }

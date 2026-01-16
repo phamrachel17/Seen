@@ -4,6 +4,8 @@ export interface User {
   email: string;
   profile_image_url?: string;
   curation_identity?: string;
+  display_name?: string;
+  bio?: string;
   created_at: string;
 }
 
@@ -58,6 +60,17 @@ export interface Friendship {
   friend_id: string;
   status: 'pending' | 'accepted' | 'rejected';
   created_at: string;
+}
+
+export interface Follow {
+  id: string;
+  follower_id: string;
+  following_id: string;
+  created_at: string;
+}
+
+export interface UserSearchResult extends Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'> {
+  is_following?: boolean;
 }
 
 export interface FeedActivity {
