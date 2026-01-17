@@ -16,7 +16,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { MovieGrid } from '@/components/movie-card';
 import { UserListItem } from '@/components/user-list-item';
 import { searchMovies, getTrendingMovies } from '@/lib/tmdb';
-import { searchUsers, followUser, unfollowUser } from '@/lib/follows';
+import { searchUsers, followUser, unfollowUser, getTopRankedUsers } from '@/lib/follows';
 import { useAuth } from '@/lib/auth-context';
 import { Movie, UserSearchResult } from '@/types';
 
@@ -32,8 +32,10 @@ export default function DiscoverScreen() {
   const [searchResults, setSearchResults] = useState<Movie[]>([]);
   const [userResults, setUserResults] = useState<UserSearchResult[]>([]);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  const [topUsers, setTopUsers] = useState<(UserSearchResult & { rankings_count: number })[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
+  const [isLoadingTopUsers, setIsLoadingTopUsers] = useState(false);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [loadingFollowIds, setLoadingFollowIds] = useState<Set<string>>(new Set());
 
@@ -53,6 +55,29 @@ export default function DiscoverScreen() {
       setIsLoadingTrending(false);
     }
   };
+
+  const loadTopUsers = async () => {
+    if (!user) return;
+    try {
+      setIsLoadingTopUsers(true);
+      const users = await getTopRankedUsers(user.id);
+      setTopUsers(users);
+      setFollowingIds(
+        new Set(users.filter((u) => u.is_following).map((u) => u.id))
+      );
+    } catch (error) {
+      console.error('Error loading top users:', error);
+    } finally {
+      setIsLoadingTopUsers(false);
+    }
+  };
+
+  // Load top users when switching to people mode
+  useEffect(() => {
+    if (searchMode === 'people' && topUsers.length === 0) {
+      loadTopUsers();
+    }
+  }, [searchMode, user]);
 
   // Debounced search
   useEffect(() => {
@@ -273,7 +298,7 @@ export default function DiscoverScreen() {
               ) : null
             )}
           </>
-        ) : (
+        ) : searchMode === 'movies' ? (
           <>
             {/* Curated/Trending List */}
             <View style={styles.sectionHeader}>
@@ -291,6 +316,41 @@ export default function DiscoverScreen() {
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>
                   Unable to load movies. Check your API key.
+                </Text>
+              </View>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Top Ranked Users */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Top Rankers</Text>
+              <Text style={styles.issueNumber}>BY MOVIES RANKED</Text>
+            </View>
+
+            {isLoadingTopUsers ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={Colors.stamp} />
+              </View>
+            ) : topUsers.length > 0 ? (
+              <View style={styles.userResultsList}>
+                {topUsers.map((userItem) => (
+                  <UserListItem
+                    key={userItem.id}
+                    user={userItem}
+                    currentUserId={user?.id || ''}
+                    isFollowing={followingIds.has(userItem.id)}
+                    isLoading={loadingFollowIds.has(userItem.id)}
+                    onFollowPress={() => handleFollowPress(userItem.id)}
+                    onUserPress={() => handleUserPress(userItem.id)}
+                    subtitle={`${userItem.rankings_count} movies ranked`}
+                  />
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  No users have ranked movies yet.
                 </Text>
               </View>
             )}

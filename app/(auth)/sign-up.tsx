@@ -22,6 +22,7 @@ export default function SignUpScreen() {
   const insets = useSafeAreaInsets();
   const { signUp } = useAuth();
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,10 +44,11 @@ export default function SignUpScreen() {
 
     // Trim inputs
     const trimmedUsername = username.trim();
+    const trimmedDisplayName = displayName.trim();
     const trimmedEmail = email.trim();
 
     // Basic validation
-    if (!trimmedUsername || !trimmedEmail || !password || !confirmPassword) {
+    if (!trimmedUsername || !trimmedDisplayName || !trimmedEmail || !password || !confirmPassword) {
       setGeneralError('Please fill in all fields');
       return;
     }
@@ -87,7 +89,7 @@ export default function SignUpScreen() {
     }
 
     // Call signUp (email normalization happens in signUp function)
-    const { error: signUpError } = await signUp(trimmedEmail, password, trimmedUsername);
+    const { error: signUpError } = await signUp(trimmedEmail, password, trimmedUsername, trimmedDisplayName);
 
     setLoading(false);
 
@@ -152,6 +154,20 @@ export default function SignUpScreen() {
                 autoCorrect={false}
               />
               {usernameError && <Text style={styles.fieldErrorText}>{usernameError}</Text>}
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Display Name</Text>
+              <TextInput
+                style={styles.input}
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="Film Critic"
+                placeholderTextColor={Colors.textMuted}
+                autoCapitalize="words"
+                autoCorrect={false}
+                maxLength={50}
+              />
             </View>
 
             <View style={styles.inputContainer}>

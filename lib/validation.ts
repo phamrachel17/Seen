@@ -63,3 +63,26 @@ export async function checkEmailAvailable(email: string): Promise<boolean> {
 
   return !data;
 }
+
+/**
+ * Get email address by username (case-insensitive)
+ * Returns the email if found, null if user doesn't exist
+ */
+export async function getEmailByUsername(username: string): Promise<string | null> {
+  const trimmed = username.trim();
+
+  const { data } = await supabase
+    .from('users')
+    .select('email')
+    .ilike('username', trimmed)
+    .maybeSingle();
+
+  return data?.email || null;
+}
+
+/**
+ * Check if input looks like an email address
+ */
+export function isEmail(input: string): boolean {
+  return input.includes('@');
+}

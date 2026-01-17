@@ -41,7 +41,7 @@ export default function ProfileScreen() {
   });
   const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [profileData, setProfileData] = useState<Pick<User, 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
+  const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
 
   const loadUserData = useCallback(async () => {
@@ -51,7 +51,7 @@ export default function ProfileScreen() {
       // Load profile data
       const { data: profile } = await supabase
         .from('users')
-        .select('profile_image_url, display_name, bio')
+        .select('username, profile_image_url, display_name, bio')
         .eq('id', user.id)
         .single();
 
@@ -183,26 +183,31 @@ export default function ProfileScreen() {
       >
         {/* Profile Section - Horizontal Layout */}
         <View style={styles.profileSection}>
-          {/* Left: Poster */}
+          {/* Left: Poster + @username */}
           <Pressable
             style={styles.avatarWrapper}
             onPress={() => router.push('/edit-profile')}
           >
-            <ProfileAvatar
-              imageUrl={profileData?.profile_image_url}
-              username={user?.user_metadata?.username || 'User'}
-              size="large"
-              variant="poster"
-            />
-            <View style={styles.editBadge}>
-              <IconSymbol name="pencil" size={12} color={Colors.paper} />
+            <View style={styles.avatarContainer}>
+              <ProfileAvatar
+                imageUrl={profileData?.profile_image_url}
+                username={profileData?.username || user?.user_metadata?.username || 'User'}
+                size="large"
+                variant="poster"
+              />
+              <View style={styles.editBadge}>
+                <IconSymbol name="pencil" size={12} color={Colors.paper} />
+              </View>
             </View>
+            <Text style={styles.usernameUnderAvatar}>
+              @{profileData?.username || user?.user_metadata?.username || 'user'}
+            </Text>
           </Pressable>
 
-          {/* Right: Name, Bio, Follow Stats */}
+          {/* Right: Display Name, Bio, Follow Stats */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
-              {profileData?.display_name?.toUpperCase() || user?.user_metadata?.username?.toUpperCase() || 'CINEPHILE'}
+              {profileData?.display_name || profileData?.username || user?.user_metadata?.username || 'Cinephile'}
             </Text>
             <Text style={styles.profileBio}>
               {profileData?.bio || 'Film Enthusiast'}
@@ -383,7 +388,16 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
   avatarWrapper: {
+    alignItems: 'center',
+  },
+  avatarContainer: {
     position: 'relative',
+  },
+  usernameUnderAvatar: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
   },
   editBadge: {
     position: 'absolute',

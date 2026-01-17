@@ -19,14 +19,14 @@ export default function SignInScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
-  const [email, setEmail] = useState('');
+  const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSignIn = async () => {
-    if (!email || !password) {
+    if (!emailOrUsername || !password) {
       setError('Please fill in all fields');
       return;
     }
@@ -34,7 +34,7 @@ export default function SignInScreen() {
     setLoading(true);
     setError(null);
 
-    const { error: signInError } = await signIn(email, password);
+    const { error: signInError } = await signIn(emailOrUsername.trim(), password);
 
     if (signInError) {
       setError(signInError.message);
@@ -57,14 +57,13 @@ export default function SignInScreen() {
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>EMAIL</Text>
+            <Text style={styles.label}>EMAIL OR USERNAME</Text>
             <TextInput
               style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="your@email.com"
+              value={emailOrUsername}
+              onChangeText={setEmailOrUsername}
+              placeholder="your@email.com or username"
               placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />

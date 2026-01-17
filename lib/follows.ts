@@ -253,6 +253,57 @@ interface ReviewWithMovie extends Review {
   movies: Movie;
 }
 
+// Get top users ranked by total movies ranked (descending)
+export async function getTopRankedUsers(
+  currentUserId: string,
+  limit: number = 20
+): Promise<(UserSearchResult & { rankings_count: number })[]> {
+  // Get all users with their rankings count
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, username, display_name, profile_image_url')
+    .neq('id', currentUserId);
+
+  if (error || !users || users.length === 0) return [];
+
+  // Get rankings count for each user
+  const userIds = users.map((u) => u.id);
+  const { data: rankings } = await supabase
+    .from('rankings')
+    .select('user_id')
+    .in('user_id', userIds);
+
+  // Count rankings per user
+  const rankingsCountMap = new Map<string, number>();
+  rankings?.forEach((r) => {
+    const count = rankingsCountMap.get(r.user_id) || 0;
+    rankingsCountMap.set(r.user_id, count + 1);
+  });
+
+  // Sort users by rankings count (descending)
+  const sortedUsers = users
+    .map((user) => ({
+      ...user,
+      rankings_count: rankingsCountMap.get(user.id) || 0,
+    }))
+    .sort((a, b) => b.rankings_count - a.rankings_count)
+    .slice(0, limit);
+
+  // Get follow status for all returned users
+  const { data: follows } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', currentUserId)
+    .in('following_id', sortedUsers.map((u) => u.id));
+
+  const followingSet = new Set(follows?.map((f) => f.following_id) || []);
+
+  return sortedUsers.map((user) => ({
+    ...user,
+    is_following: followingSet.has(user.id),
+  }));
+}
+
 export async function getUserRecentReviews(
   userId: string,
   currentUserId: string,

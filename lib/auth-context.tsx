@@ -1,14 +1,14 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-import { normalizeEmail } from './validation';
+import { normalizeEmail, isEmail, getEmailByUsername } from './validation';
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, username: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, username: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -36,21 +36,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    // Normalize email to match how it was stored during sign-up
-    const normalizedEmail = normalizeEmail(email);
+  const signIn = async (emailOrUsername: string, password: string) => {
+    let email: string;
+
+    // Check if input is email or username
+    if (isEmail(emailOrUsername)) {
+      // Normalize email to match how it was stored during sign-up
+      email = normalizeEmail(emailOrUsername);
+    } else {
+      // Look up email by username
+      const foundEmail = await getEmailByUsername(emailOrUsername);
+      if (!foundEmail) {
+        return { error: new Error('User not found') };
+      }
+      email = foundEmail;
+    }
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
+      email,
       password,
     });
     return { error: error as Error | null };
   };
 
-  const signUp = async (email: string, password: string, username: string) => {
+  const signUp = async (email: string, password: string, username: string, displayName?: string) => {
     // Normalize email to prevent Gmail duplicates (dots, aliases)
     const normalizedEmail = normalizeEmail(email);
     const trimmedUsername = username.trim();
+    const trimmedDisplayName = displayName?.trim();
 
     const { error } = await supabase.auth.signUp({
       email: normalizedEmail,
@@ -58,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: {
         data: {
           username: trimmedUsername,
+          display_name: trimmedDisplayName || null,
         },
       },
     });

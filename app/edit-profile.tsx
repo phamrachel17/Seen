@@ -19,6 +19,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
+import { checkUsernameAvailable } from '@/lib/validation';
 
 export default function EditProfileModal() {
   const router = useRouter();
@@ -28,10 +29,13 @@ export default function EditProfileModal() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [username, setUsername] = useState('');
+  const [originalUsername, setOriginalUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [localImageUri, setLocalImageUri] = useState<string | null>(null);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
 
   useEffect(() => {
     loadProfile();
@@ -43,11 +47,13 @@ export default function EditProfileModal() {
     try {
       const { data } = await supabase
         .from('users')
-        .select('display_name, bio, profile_image_url')
+        .select('username, display_name, bio, profile_image_url')
         .eq('id', user.id)
         .single();
 
       if (data) {
+        setUsername(data.username || '');
+        setOriginalUsername(data.username || '');
         setDisplayName(data.display_name || '');
         setBio(data.bio || '');
         setImageUrl(data.profile_image_url);
@@ -133,9 +139,33 @@ export default function EditProfileModal() {
   const handleSave = async () => {
     if (!user) return;
 
+    setUsernameError(null);
+    const trimmedUsername = username.trim();
+
+    // Validate username
+    if (!trimmedUsername) {
+      setUsernameError('Username is required');
+      return;
+    }
+
+    if (trimmedUsername.length < 3) {
+      setUsernameError('Username must be at least 3 characters');
+      return;
+    }
+
     setIsSaving(true);
 
     try {
+      // Check if username changed and if new one is available
+      if (trimmedUsername.toLowerCase() !== originalUsername.toLowerCase()) {
+        const isAvailable = await checkUsernameAvailable(trimmedUsername);
+        if (!isAvailable) {
+          setUsernameError('This username is already taken');
+          setIsSaving(false);
+          return;
+        }
+      }
+
       let finalImageUrl = imageUrl;
 
       if (localImageUri) {
@@ -148,6 +178,7 @@ export default function EditProfileModal() {
       const { error } = await supabase
         .from('users')
         .update({
+          username: trimmedUsername,
           display_name: displayName.trim() || null,
           bio: bio.trim() || null,
           profile_image_url: finalImageUrl,
@@ -156,7 +187,11 @@ export default function EditProfileModal() {
 
       if (error) {
         console.error('Error saving profile:', error);
-        Alert.alert('Error', 'Could not save your profile. Please try again.');
+        if (error.message?.includes('username')) {
+          setUsernameError('This username is already taken');
+        } else {
+          Alert.alert('Error', 'Could not save your profile. Please try again.');
+        }
         return;
       }
 
@@ -172,8 +207,6 @@ export default function EditProfileModal() {
   const handleClose = () => {
     router.back();
   };
-
-  const username = user?.user_metadata?.username || 'User';
 
   if (isLoading) {
     return (
@@ -206,7 +239,7 @@ export default function EditProfileModal() {
           <View style={styles.posterWrapper}>
             <ProfileAvatar
               imageUrl={localImageUri || imageUrl}
-              username={username}
+              username={username || 'User'}
               size="large"
               variant="poster"
             />
@@ -218,12 +251,30 @@ export default function EditProfileModal() {
         </Pressable>
 
         <View style={styles.formSection}>
+          <Text style={styles.label}>USERNAME</Text>
+          <TextInput
+            style={[styles.textInput, usernameError && styles.inputError]}
+            value={username}
+            onChangeText={(text) => {
+              setUsername(text);
+              setUsernameError(null);
+            }}
+            placeholder="username"
+            placeholderTextColor={Colors.textMuted}
+            maxLength={30}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {usernameError && <Text style={styles.errorText}>{usernameError}</Text>}
+        </View>
+
+        <View style={styles.formSection}>
           <Text style={styles.label}>DISPLAY NAME</Text>
           <TextInput
             style={styles.textInput}
             value={displayName}
             onChangeText={setDisplayName}
-            placeholder={username}
+            placeholder="Your display name"
             placeholderTextColor={Colors.textMuted}
             maxLength={50}
             autoCapitalize="words"
@@ -356,6 +407,16 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
+  },
+  inputError: {
+    borderColor: Colors.error,
+    borderWidth: 2,
+  },
+  errorText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.error,
+    marginTop: Spacing.xs,
   },
   bioInput: {
     height: 120,

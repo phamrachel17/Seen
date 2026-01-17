@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS public.users (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   username TEXT UNIQUE NOT NULL,
+  display_name TEXT,
+  bio TEXT,
   profile_image_url TEXT,
   curation_identity TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -84,6 +86,16 @@ CREATE TABLE IF NOT EXISTS public.friendships (
   CHECK (user_id != friend_id)
 );
 
+-- Follows (instant follow system)
+CREATE TABLE IF NOT EXISTS public.follows (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  follower_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT follows_no_self_follow CHECK (follower_id != following_id),
+  CONSTRAINT follows_unique UNIQUE (follower_id, following_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_reviews_user_id ON public.reviews(user_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_movie_id ON public.reviews(movie_id);
@@ -92,6 +104,8 @@ CREATE INDEX IF NOT EXISTS idx_rankings_rank_position ON public.rankings(user_id
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON public.bookmarks(user_id);
 CREATE INDEX IF NOT EXISTS idx_friendships_user_id ON public.friendships(user_id);
 CREATE INDEX IF NOT EXISTS idx_friendships_friend_id ON public.friendships(friend_id);
+CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON public.follows(follower_id);
+CREATE INDEX IF NOT EXISTS idx_follows_following_id ON public.follows(following_id);
 
 -- Row Level Security (RLS) Policies
 
@@ -102,6 +116,7 @@ ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rankings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookmarks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 
 -- Users policies
 CREATE POLICY "Users can view all profiles" ON public.users
@@ -163,15 +178,26 @@ CREATE POLICY "Users can update friendships they're part of" ON public.friendshi
 CREATE POLICY "Users can delete own friendship requests" ON public.friendships
   FOR DELETE USING (auth.uid() = user_id);
 
+-- Follows policies
+CREATE POLICY "Follows are viewable by everyone" ON public.follows
+  FOR SELECT USING (true);
+
+CREATE POLICY "Users can follow others" ON public.follows
+  FOR INSERT WITH CHECK (auth.uid() = follower_id);
+
+CREATE POLICY "Users can unfollow" ON public.follows
+  FOR DELETE USING (auth.uid() = follower_id);
+
 -- Trigger to auto-create user profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.users (id, email, username)
+  INSERT INTO public.users (id, email, username, display_name)
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1))
+    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1)),
+    NEW.raw_user_meta_data->>'display_name'
   );
   RETURN NEW;
 END;

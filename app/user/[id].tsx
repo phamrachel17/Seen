@@ -192,43 +192,8 @@ export default function UserProfileScreen() {
         <Pressable style={styles.backButton} onPress={handleBack}>
           <IconSymbol name="chevron.left" size={20} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>
-          @{profileData.username}
-        </Text>
-        {!isOwnProfile ? (
-          <Pressable
-            style={({ pressed }) => [
-              styles.followHeaderButton,
-              isFollowing
-                ? styles.followingHeaderButton
-                : styles.notFollowingHeaderButton,
-              pressed && styles.buttonPressed,
-              isFollowLoading && styles.buttonDisabled,
-            ]}
-            onPress={handleFollowPress}
-            disabled={isFollowLoading}
-          >
-            {isFollowLoading ? (
-              <ActivityIndicator
-                size="small"
-                color={isFollowing ? Colors.stamp : Colors.paper}
-              />
-            ) : (
-              <Text
-                style={[
-                  styles.followHeaderButtonText,
-                  isFollowing
-                    ? styles.followingHeaderButtonText
-                    : styles.notFollowingHeaderButtonText,
-                ]}
-              >
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            )}
-          </Pressable>
-        ) : (
-          <View style={styles.headerSpacer} />
-        )}
+        <Text style={styles.headerTitle}>Profile</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView
@@ -245,7 +210,7 @@ export default function UserProfileScreen() {
       >
         {/* Profile Section - Horizontal Layout */}
         <View style={styles.profileSection}>
-          {/* Left: Poster */}
+          {/* Left: Poster + @username */}
           <View style={styles.avatarWrapper}>
             <ProfileAvatar
               imageUrl={profileData.profile_image_url}
@@ -253,9 +218,10 @@ export default function UserProfileScreen() {
               size="large"
               variant="poster"
             />
+            <Text style={styles.usernameUnderAvatar}>@{profileData.username}</Text>
           </View>
 
-          {/* Right: Name, Bio, Follow Stats */}
+          {/* Right: Display Name, Bio, Follow Stats, Follow Button */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
               {profileData.display_name?.toUpperCase() ||
@@ -296,6 +262,38 @@ export default function UserProfileScreen() {
                 <Text style={styles.followLabel}>Followers</Text>
               </Pressable>
             </View>
+
+            {/* Follow Button - Under follower/following counts */}
+            {!isOwnProfile && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.followButton,
+                  isFollowing ? styles.followingButton : styles.notFollowingButton,
+                  pressed && styles.buttonPressed,
+                  isFollowLoading && styles.buttonDisabled,
+                ]}
+                onPress={handleFollowPress}
+                disabled={isFollowLoading}
+              >
+                {isFollowLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={isFollowing ? Colors.stamp : Colors.paper}
+                  />
+                ) : (
+                  <Text
+                    style={[
+                      styles.followButtonText,
+                      isFollowing
+                        ? styles.followingButtonText
+                        : styles.notFollowingButtonText,
+                    ]}
+                  >
+                    {isFollowing ? 'Following' : 'Follow'}
+                  </Text>
+                )}
+              </Pressable>
+            )}
           </View>
         </View>
 
@@ -434,45 +432,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.lg,
-    color: Colors.textMuted,
+    fontFamily: Fonts.serifBoldItalic,
+    fontSize: FontSizes['2xl'],
+    color: Colors.stamp,
   },
   headerSpacer: {
     width: 36,
-  },
-  followHeaderButton: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    minWidth: 90,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-  },
-  notFollowingHeaderButton: {
-    backgroundColor: Colors.stamp,
-  },
-  followingHeaderButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   buttonPressed: {
     opacity: 0.8,
   },
   buttonDisabled: {
     opacity: 0.6,
-  },
-  followHeaderButtonText: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.sm,
-  },
-  notFollowingHeaderButtonText: {
-    color: Colors.paper,
-  },
-  followingHeaderButtonText: {
-    color: Colors.text,
   },
   scrollView: {
     flex: 1,
@@ -488,6 +459,13 @@ const styles = StyleSheet.create({
   },
   avatarWrapper: {
     position: 'relative',
+    alignItems: 'center',
+  },
+  usernameUnderAvatar: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
   },
   profileInfo: {
     flex: 1,
@@ -528,6 +506,33 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
+  },
+  followButton: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
+    marginTop: Spacing.md,
+  },
+  notFollowingButton: {
+    backgroundColor: Colors.stamp,
+  },
+  followingButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  followButtonText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+  },
+  notFollowingButtonText: {
+    color: Colors.paper,
+  },
+  followingButtonText: {
+    color: Colors.text,
   },
   statsContainer: {
     flexDirection: 'row',
