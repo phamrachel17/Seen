@@ -1,4 +1,4 @@
-import { Movie } from '@/types';
+import { Movie, MovieDetails, CastMember, CrewMember } from '@/types';
 
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY ?? '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
@@ -43,12 +43,25 @@ interface TMDBMovie {
   belongs_to_collection?: TMDBCollection | null;
 }
 
+interface TMDBCastMember {
+  id: number;
+  name: string;
+  character: string;
+  profile_path: string | null;
+  order: number;
+}
+
+interface TMDBCrewMember {
+  id: number;
+  name: string;
+  job: string;
+  department: string;
+  profile_path: string | null;
+}
+
 interface TMDBCredits {
-  crew: {
-    id: number;
-    name: string;
-    job: string;
-  }[];
+  cast: TMDBCastMember[];
+  crew: TMDBCrewMember[];
 }
 
 interface TMDBSearchResponse {
@@ -69,6 +82,12 @@ export function getImageUrl(
   }
   const sizeKey = ImageSize[type][size as keyof (typeof ImageSize)[typeof type]];
   return `${TMDB_IMAGE_BASE}/${sizeKey}${path}`;
+}
+
+// Helper for profile/person images
+export function getProfileImageUrl(path: string | null): string {
+  if (!path) return '';
+  return `${TMDB_IMAGE_BASE}/w185${path}`;
 }
 
 // Transform TMDB movie to our Movie type
@@ -137,8 +156,11 @@ export async function searchMovies(query: string, page: number = 1): Promise<{
   };
 }
 
-// Get movie details by ID (includes director from credits)
-export async function getMovieDetails(movieId: number): Promise<Movie> {
+// Key crew roles to extract
+const KEY_CREW_JOBS = ['Director', 'Writer', 'Screenplay', 'Producer', 'Cinematography', 'Original Music Composer'];
+
+// Get movie details by ID (includes cast/crew from credits)
+export async function getMovieDetails(movieId: number): Promise<MovieDetails> {
   // Fetch movie details and credits in parallel
   const [movieData, creditsData] = await Promise.all([
     tmdbFetch<TMDBMovie>(`/movie/${movieId}`),
@@ -148,7 +170,40 @@ export async function getMovieDetails(movieId: number): Promise<Movie> {
   // Find director from credits
   const director = creditsData.crew.find((c) => c.job === 'Director')?.name;
 
-  return transformMovie(movieData, director);
+  // Extract top 10 cast members sorted by billing order
+  const cast: CastMember[] = creditsData.cast
+    .sort((a, b) => a.order - b.order)
+    .slice(0, 10)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      character: c.character,
+      profile_url: getProfileImageUrl(c.profile_path),
+    }));
+
+  // Extract key crew members (deduplicated by id)
+  const seenCrewIds = new Set<number>();
+  const crew: CrewMember[] = creditsData.crew
+    .filter((c) => KEY_CREW_JOBS.includes(c.job))
+    .filter((c) => {
+      if (seenCrewIds.has(c.id)) return false;
+      seenCrewIds.add(c.id);
+      return true;
+    })
+    .slice(0, 10)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      job: c.job,
+      department: c.department,
+      profile_url: getProfileImageUrl(c.profile_path),
+    }));
+
+  return {
+    ...transformMovie(movieData, director),
+    cast,
+    crew,
+  };
 }
 
 // Get popular movies

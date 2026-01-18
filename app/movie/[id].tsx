@@ -10,18 +10,23 @@ import {
   StatusBar,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { CastCrewSection } from '@/components/cast-crew-section';
+import { FriendChipsDisplay } from '@/components/friend-chips';
+import { ProfileAvatar } from '@/components/profile-avatar';
 import { getMovieDetails } from '@/lib/tmdb';
+import { getMovieAverageRating, getFriendsReviewsForMovie, FriendReview } from '@/lib/social';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, Review, Ranking } from '@/types';
+import { MovieDetails, Review, Ranking } from '@/types';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const HEADER_MIN_HEIGHT = 220;
-const HEADER_MAX_HEIGHT = 400;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const HEADER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.35);
+const HEADER_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.45);
 
 export default function MovieDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,12 +36,17 @@ export default function MovieDetailScreen() {
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  const [movie, setMovie] = useState<Movie | null>(null);
+  const [movie, setMovie] = useState<MovieDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [userReview, setUserReview] = useState<Review | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [isTogglingBookmark, setIsTogglingBookmark] = useState(false);
+  const [communityRating, setCommunityRating] = useState<{
+    average: number;
+    count: number;
+  } | null>(null);
+  const [friendsReviews, setFriendsReviews] = useState<FriendReview[]>([]);
 
   useEffect(() => {
     if (id) {
@@ -49,17 +59,23 @@ export default function MovieDetailScreen() {
     try {
       setIsLoading(true);
 
-      // Fetch movie details from TMDB
-      const movieData = await getMovieDetails(movieId);
+      // Fetch movie details from TMDB and community rating in parallel
+      const [movieData, ratingData] = await Promise.all([
+        getMovieDetails(movieId),
+        getMovieAverageRating(movieId),
+      ]);
       setMovie(movieData);
+      setCommunityRating(ratingData);
 
-      // Check user's bookmark, review, and ranking status
+      // Check user's bookmark, review, ranking status, and friends' reviews
       if (user) {
-        await Promise.all([
+        const [, , , friendReviews] = await Promise.all([
           checkBookmarkStatus(movieId),
           loadUserReview(movieId),
           loadUserRanking(movieId),
+          getFriendsReviewsForMovie(user.id, movieId),
         ]);
+        setFriendsReviews(friendReviews);
       }
     } catch (error) {
       console.error('Error loading movie:', error);
@@ -129,7 +145,7 @@ export default function MovieDetailScreen() {
     }
   };
 
-  const cacheMovie = async (movieData: Movie) => {
+  const cacheMovie = async (movieData: MovieDetails) => {
     await supabase.from('movies').upsert({
       id: movieData.id,
       title: movieData.title,
@@ -220,25 +236,18 @@ export default function MovieDetailScreen() {
             <Text style={styles.headerPlaceholderText}>{movie.title[0]}</Text>
           </View>
         )}
-        {/* Gradient overlay */}
-        <View style={styles.headerGradient} />
+        {/* Gradient overlay for smooth fade to background */}
+        <LinearGradient
+          colors={['transparent', 'transparent', Colors.background]}
+          locations={[0, 0.5, 1]}
+          style={styles.headerGradient}
+        />
       </Animated.View>
 
-      {/* Header Buttons */}
+      {/* Back Button Only */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.white} />
-        </Pressable>
-        <Pressable
-          onPress={toggleBookmark}
-          style={styles.bookmarkButton}
-          disabled={isTogglingBookmark}
-        >
-          <IconSymbol
-            name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
-            size={24}
-            color={isBookmarked ? Colors.stamp : Colors.white}
-          />
         </Pressable>
       </View>
 
@@ -257,21 +266,62 @@ export default function MovieDetailScreen() {
         <View style={styles.infoContainer}>
           <Text style={styles.title}>{movie.title}</Text>
 
+          {/* Rating Row: Stars + Numeric + Count ... Bookmark */}
+          <View style={styles.ratingRow}>
+            <View style={styles.ratingLeft}>
+              {communityRating ? (
+                <>
+                  <View style={styles.starsRow}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <IconSymbol
+                        key={star}
+                        name={star <= Math.round(communityRating.average) ? 'star.fill' : 'star'}
+                        size={14}
+                        color={star <= Math.round(communityRating.average) ? Colors.starFilled : Colors.starEmpty}
+                      />
+                    ))}
+                  </View>
+                  <Text style={styles.ratingNumeric}>{communityRating.average.toFixed(1)}</Text>
+                  <Text style={styles.ratingCount}>({communityRating.count})</Text>
+                </>
+              ) : (
+                <Text style={styles.noRatings}>No ratings yet</Text>
+              )}
+            </View>
+            <Pressable
+              onPress={toggleBookmark}
+              style={styles.bookmarkButtonInline}
+              disabled={isTogglingBookmark}
+            >
+              <IconSymbol
+                name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
+                size={22}
+                color={Colors.stamp}
+              />
+            </Pressable>
+          </View>
+
+          {/* Meta Row: Year • Director • Runtime ... #Ranking */}
           <View style={styles.metaRow}>
-            {movie.release_year ? (
-              <Text style={styles.year}>{movie.release_year}</Text>
-            ) : null}
-            {movie.director ? (
-              <>
-                <Text style={styles.metaDivider}>•</Text>
-                <Text style={styles.director}>{movie.director}</Text>
-              </>
-            ) : null}
-            {movie.runtime_minutes ? (
-              <>
-                <Text style={styles.metaDivider}>•</Text>
-                <Text style={styles.runtime}>{movie.runtime_minutes} min</Text>
-              </>
+            <View style={styles.metaLeft}>
+              {movie.release_year ? (
+                <Text style={styles.year}>{movie.release_year}</Text>
+              ) : null}
+              {movie.director ? (
+                <>
+                  <Text style={styles.metaDivider}>•</Text>
+                  <Text style={styles.director}>{movie.director}</Text>
+                </>
+              ) : null}
+              {movie.runtime_minutes ? (
+                <>
+                  <Text style={styles.metaDivider}>•</Text>
+                  <Text style={styles.runtime}>{movie.runtime_minutes}m</Text>
+                </>
+              ) : null}
+            </View>
+            {userRanking ? (
+              <Text style={styles.inlineRanking}>#{userRanking.rank_position}</Text>
             ) : null}
           </View>
 
@@ -289,49 +339,104 @@ export default function MovieDetailScreen() {
             <Text style={styles.synopsis}>{movie.synopsis}</Text>
           ) : null}
 
-          {/* User's Ranking */}
-          {userRanking ? (
-            <View style={styles.userRankingContainer}>
-              <Text style={styles.userRankingLabel}>YOUR RANKING</Text>
-              <Text style={styles.userRankingValue}>#{userRanking.rank_position}</Text>
-            </View>
-          ) : null}
+          {/* Action Button - only show if no review yet */}
+          {!userReview && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.reviewButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={openReviewModal}
+            >
+              <Text style={styles.reviewButtonText}>Write a Review</Text>
+            </Pressable>
+          )}
 
-          {/* Action Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.reviewButton,
-              pressed && styles.buttonPressed,
-            ]}
-            onPress={openReviewModal}
-          >
-            <Text style={styles.reviewButtonText}>
-              {userReview ? 'Edit Review' : 'Write a Review'}
-            </Text>
-          </Pressable>
-
-          {/* User's Review */}
-          {userReview ? (
-            <View style={styles.userReviewContainer}>
-              <View style={styles.reviewHeader}>
-                <Text style={styles.reviewLabel}>YOUR REVIEW</Text>
-                <View style={styles.starsRow}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <IconSymbol
-                      key={star}
-                      name={star <= userReview.star_rating ? 'star.fill' : 'star'}
-                      size={16}
-                      color={star <= userReview.star_rating ? Colors.starFilled : Colors.starEmpty}
-                    />
-                  ))}
+          {/* User's Review Section */}
+          {userReview && (
+            <View style={styles.yourTakeSection}>
+              <Text style={styles.yourTakeLabel}>Your Take:</Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.userReviewContainer,
+                  pressed && styles.reviewPressed,
+                ]}
+                onPress={openReviewModal}
+              >
+                <View style={styles.reviewHeader}>
+                  <View style={styles.starsRow}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <IconSymbol
+                        key={star}
+                        name={star <= userReview.star_rating ? 'star.fill' : 'star'}
+                        size={16}
+                        color={star <= userReview.star_rating ? Colors.starFilled : Colors.starEmpty}
+                      />
+                    ))}
+                  </View>
                 </View>
-              </View>
-              {userReview.review_text ? (
-                <Text style={styles.reviewText}>{userReview.review_text}</Text>
-              ) : null}
+                {userReview.review_text ? (
+                  <Text style={styles.reviewText}>{userReview.review_text}</Text>
+                ) : null}
+                {userReview.tagged_friends && userReview.tagged_friends.length > 0 && (
+                  <FriendChipsDisplay userIds={userReview.tagged_friends} />
+                )}
+                <View style={styles.editHint}>
+                  <IconSymbol name="pencil" size={12} color={Colors.textMuted} />
+                  <Text style={styles.editHintText}>Tap to edit</Text>
+                </View>
+              </Pressable>
             </View>
-          ) : null}
+          )}
         </View>
+
+        {/* Friends' Takes Section */}
+        {friendsReviews.length > 0 && (
+          <View style={styles.friendsReviewsSection}>
+            <Text style={styles.friendsReviewsLabel}>Friends&apos; Take:</Text>
+            {friendsReviews.map((review) => (
+              <View key={review.id} style={styles.friendReviewCard}>
+                <View style={styles.friendReviewHeader}>
+                  <Pressable
+                    style={styles.friendInfo}
+                    onPress={() => router.push(`/user/${review.user_id}`)}
+                  >
+                    <ProfileAvatar
+                      imageUrl={review.users.profile_image_url}
+                      username={review.users.username}
+                      size="small"
+                      variant="circle"
+                    />
+                    <Text style={styles.friendName}>
+                      {review.users.display_name || review.users.username}
+                    </Text>
+                  </Pressable>
+                  <View style={styles.starsRow}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <IconSymbol
+                        key={star}
+                        name={star <= review.star_rating ? 'star.fill' : 'star'}
+                        size={12}
+                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
+                      />
+                    ))}
+                  </View>
+                </View>
+                {review.review_text && (
+                  <Text style={styles.friendReviewText}>{review.review_text}</Text>
+                )}
+                {review.tagged_friends && review.tagged_friends.length > 0 && (
+                  <FriendChipsDisplay userIds={review.tagged_friends} />
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Cast & Crew Section */}
+        {(movie.cast?.length > 0 || movie.crew?.length > 0) && (
+          <CastCrewSection cast={movie.cast || []} crew={movie.crew || []} />
+        )}
       </Animated.ScrollView>
     </View>
   );
@@ -400,9 +505,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 80,
-    backgroundColor: 'transparent',
-    // Gradient effect using shadow
+    height: '100%',
   },
   header: {
     position: 'absolute',
@@ -411,20 +514,12 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bookmarkButton: {
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
@@ -451,13 +546,49 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.text,
+    marginBottom: Spacing.xs,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.sm,
+  },
+  ratingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  ratingNumeric: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  ratingCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  noRatings: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  bookmarkButtonInline: {
+    padding: Spacing.xs,
   },
   metaRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  metaLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    marginBottom: Spacing.md,
+    flex: 1,
   },
   year: {
     fontFamily: Fonts.sans,
@@ -479,6 +610,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
+  },
+  inlineRanking: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.lg,
+    color: Colors.stamp,
+    marginLeft: Spacing.md,
   },
   genresRow: {
     flexDirection: 'row',
@@ -504,27 +641,6 @@ const styles = StyleSheet.create({
     lineHeight: FontSizes.md * 1.6,
     marginBottom: Spacing.xl,
   },
-  userRankingContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.cardBackground,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.xl,
-  },
-  userRankingLabel: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-    letterSpacing: 1,
-  },
-  userRankingValue: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes['2xl'],
-    color: Colors.stamp,
-  },
   reviewButton: {
     paddingVertical: Spacing.lg,
     borderRadius: BorderRadius.sm,
@@ -541,6 +657,15 @@ const styles = StyleSheet.create({
     color: Colors.white,
     letterSpacing: 1,
   },
+  yourTakeSection: {
+    marginTop: Spacing.lg,
+  },
+  yourTakeLabel: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+  },
   userReviewContainer: {
     paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing.lg,
@@ -549,15 +674,23 @@ const styles = StyleSheet.create({
   },
   reviewHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
-  reviewLabel: {
+  reviewPressed: {
+    opacity: 0.8,
+  },
+  editHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginTop: Spacing.md,
+  },
+  editHintText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
-    letterSpacing: 1,
   },
   starsRow: {
     flexDirection: 'row',
@@ -568,5 +701,43 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.text,
     lineHeight: FontSizes.md * 1.5,
+  },
+  friendsReviewsSection: {
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+  },
+  friendsReviewsLabel: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+  },
+  friendReviewCard: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  friendReviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  friendInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  friendName: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
+  friendReviewText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    lineHeight: FontSizes.sm * 1.5,
   },
 });

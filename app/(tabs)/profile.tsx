@@ -16,7 +16,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { getFollowCounts } from '@/lib/follows';
+import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
 import { Movie, Review, User } from '@/types';
 
 interface ReviewWithMovie extends Review {
@@ -43,6 +43,7 @@ export default function ProfileScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
+  const [rankingPosition, setRankingPosition] = useState<number | null>(null);
 
   const loadUserData = useCallback(async () => {
     if (!user) return;
@@ -110,9 +111,13 @@ export default function ProfileScreen() {
         setRecentReviews(reviewsWithMovies);
       }
 
-      // Load follow counts
-      const counts = await getFollowCounts(user.id);
+      // Load follow counts and ranking position
+      const [counts, position] = await Promise.all([
+        getFollowCounts(user.id),
+        getUserRankingPosition(user.id),
+      ]);
       setFollowCounts(counts);
+      setRankingPosition(position);
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -263,7 +268,7 @@ export default function ProfileScreen() {
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>
-              {stats.rankingsCount > 0 ? stats.rankingsCount : '—'}
+              {rankingPosition ? `#${rankingPosition}` : '—'}
             </Text>
             <Text style={styles.statLabel}>RANKED</Text>
           </View>

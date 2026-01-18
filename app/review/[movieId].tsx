@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,18 +12,24 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { StarRating } from '@/components/star-rating';
+import { SuggestedFriendPills } from '@/components/suggested-friend-pills';
 import { getMovieDetails } from '@/lib/tmdb';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
+import { createNotification } from '@/lib/social';
+import { getPendingFriendSelection } from '@/lib/friend-picker-state';
+import { removeRanking } from '@/lib/ranking';
 import { Movie, Review } from '@/types';
 
 export default function ReviewModal() {
-  const { movieId } = useLocalSearchParams<{ movieId: string }>();
+  const params = useLocalSearchParams<{
+    movieId: string;
+  }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -35,15 +41,27 @@ export default function ReviewModal() {
 
   // Form state
   const [starRating, setStarRating] = useState(0);
+  const [originalStarRating, setOriginalStarRating] = useState<number | null>(null);
   const [reviewText, setReviewText] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [taggedFriends, setTaggedFriends] = useState<string[]>([]);
 
   useEffect(() => {
-    if (movieId) {
-      loadData(parseInt(movieId, 10));
+    if (params.movieId) {
+      loadData(parseInt(params.movieId, 10));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movieId]);
+  }, [params.movieId]);
+
+  // Handle selected friends returning from friend picker
+  useFocusEffect(
+    useCallback(() => {
+      const pending = getPendingFriendSelection();
+      if (pending) {
+        setTaggedFriends(pending);
+      }
+    }, [])
+  );
 
   const loadData = async (id: number) => {
     try {
@@ -65,8 +83,10 @@ export default function ReviewModal() {
         if (review) {
           setExistingReview(review);
           setStarRating(review.star_rating);
+          setOriginalStarRating(review.star_rating);
           setReviewText(review.review_text || '');
           setIsPrivate(review.is_private);
+          setTaggedFriends(review.tagged_friends || []);
         }
       }
     } catch (error) {
@@ -108,7 +128,7 @@ export default function ReviewModal() {
         star_rating: starRating,
         review_text: reviewText.trim() || null,
         is_private: isPrivate,
-        tagged_friends: [],
+        tagged_friends: taggedFriends,
       };
 
       if (existingReview) {
@@ -125,16 +145,39 @@ export default function ReviewModal() {
           console.error('Error updating review:', error);
           return;
         }
-        // Go back when editing
-        router.back();
+
+        // Check if star rating changed - need to re-rank
+        if (originalStarRating !== null && starRating !== originalStarRating) {
+          // Delete existing ranking first, then trigger ranking flow
+          await removeRanking(user.id, movie.id);
+          router.replace(`/rank/${movie.id}?starRating=${starRating}`);
+        } else {
+          // No rating change, just go back
+          router.back();
+        }
       } else {
         // Create new review
-        const { error } = await supabase.from('reviews').insert(reviewData);
+        const { data: newReview, error } = await supabase
+          .from('reviews')
+          .insert(reviewData)
+          .select('id')
+          .single();
 
-        if (error) {
+        if (error || !newReview) {
           console.error('Error inserting review:', error);
           return;
         }
+
+        // Send notifications to tagged friends
+        for (const friendId of taggedFriends) {
+          await createNotification({
+            user_id: friendId,
+            actor_id: user.id,
+            type: 'tagged',
+            review_id: newReview.id,
+          });
+        }
+
         // Navigate to ranking flow with star rating for tier-based ranking
         router.replace(`/rank/${movie.id}?starRating=${starRating}`);
       }
@@ -250,6 +293,40 @@ export default function ReviewModal() {
             trackColor={{ false: Colors.dust, true: Colors.stamp }}
             thumbColor={Colors.white}
           />
+        </View>
+
+        {/* Watched With - Section Header with Chevron */}
+        <View style={styles.watchedWithSection}>
+          <Pressable
+            style={styles.sectionHeader}
+            onPress={() =>
+              router.push({
+                pathname: '/friend-picker',
+                params: {
+                  movieId: params.movieId,
+                  selectedIds: taggedFriends.join(','),
+                },
+              })
+            }
+          >
+            <Text style={styles.sectionLabel}>WATCHED WITH</Text>
+            <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
+          </Pressable>
+
+          {/* Inline Suggestion Pills - Quick Toggle */}
+          {user && (
+            <SuggestedFriendPills
+              userId={user.id}
+              selectedIds={taggedFriends}
+              onToggle={(id) => {
+                setTaggedFriends((prev) =>
+                  prev.includes(id)
+                    ? prev.filter((f) => f !== id)
+                    : [...prev, id]
+                );
+              }}
+            />
+          )}
         </View>
 
         {/* Action Buttons */}
@@ -417,6 +494,26 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
+  },
+  watchedWithSection: {
+    marginBottom: Spacing['2xl'],
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  addFriendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  addFriendText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
   },
   actions: {
     gap: Spacing.md,

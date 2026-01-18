@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   FlatList,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -17,6 +17,7 @@ import { MovieGrid } from '@/components/movie-card';
 import { UserListItem } from '@/components/user-list-item';
 import { searchMovies, getTrendingMovies } from '@/lib/tmdb';
 import { searchUsers, followUser, unfollowUser, getTopRankedUsers } from '@/lib/follows';
+import { getUnreadNotificationCount } from '@/lib/social';
 import { useAuth } from '@/lib/auth-context';
 import { Movie, UserSearchResult } from '@/types';
 
@@ -38,11 +39,21 @@ export default function DiscoverScreen() {
   const [isLoadingTopUsers, setIsLoadingTopUsers] = useState(false);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [loadingFollowIds, setLoadingFollowIds] = useState<Set<string>>(new Set());
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Load trending movies on mount
   useEffect(() => {
     loadTrendingMovies();
   }, []);
+
+  // Load unread notification count on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        getUnreadNotificationCount(user.id).then(setUnreadCount);
+      }
+    }, [user])
+  );
 
   const loadTrendingMovies = async () => {
     try {
@@ -184,8 +195,18 @@ export default function DiscoverScreen() {
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <Text style={styles.title}>Seen</Text>
         <View style={styles.headerActions}>
-          <Pressable style={styles.iconButton}>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push('/notifications')}
+          >
             <IconSymbol name="bell" size={22} color={Colors.text} />
+            {unreadCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </Pressable>
         </View>
       </View>
@@ -384,6 +405,24 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: Spacing.xs,
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 10,
+    color: Colors.white,
   },
   searchContainer: {
     paddingHorizontal: Spacing.xl,

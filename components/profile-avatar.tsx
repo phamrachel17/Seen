@@ -4,7 +4,7 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 
 type AvatarVariant = 'circle' | 'poster';
-type AvatarSize = 'small' | 'medium' | 'large';
+type AvatarSize = 'tiny' | 'small' | 'medium' | 'large';
 
 interface ProfileAvatarProps {
   imageUrl?: string | null;
@@ -15,6 +15,7 @@ interface ProfileAvatarProps {
 
 // Circular sizes (for feed, comments, etc.)
 const CIRCLE_SIZES: Record<AvatarSize, number> = {
+  tiny: 24,
   small: 40,
   medium: 64,
   large: 96,
@@ -22,6 +23,7 @@ const CIRCLE_SIZES: Record<AvatarSize, number> = {
 
 // Poster sizes (width) - height is calculated from aspect ratio
 const POSTER_WIDTHS: Record<AvatarSize, number> = {
+  tiny: 36,
   small: 60,
   medium: 100,
   large: 140,
@@ -30,6 +32,7 @@ const POSTER_WIDTHS: Record<AvatarSize, number> = {
 const POSTER_ASPECT_RATIO = 2 / 3; // Classic movie poster ratio
 
 const FONT_SIZES: Record<AvatarSize, number> = {
+  tiny: FontSizes.xs,
   small: FontSizes.md,
   medium: FontSizes.xl,
   large: FontSizes['2xl'],

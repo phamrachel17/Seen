@@ -213,6 +213,35 @@ export async function getUserProfile(
   return data;
 }
 
+// Get user's ranking position among all users (based on total movies ranked)
+// Returns the position (1 = most movies ranked) or null if user has no rankings
+export async function getUserRankingPosition(userId: string): Promise<number | null> {
+  // Get all users' rankings counts
+  const { data: allRankings, error } = await supabase
+    .from('rankings')
+    .select('user_id');
+
+  if (error || !allRankings) return null;
+
+  // Count rankings per user
+  const rankingsCountMap = new Map<string, number>();
+  allRankings.forEach((r) => {
+    const count = rankingsCountMap.get(r.user_id) || 0;
+    rankingsCountMap.set(r.user_id, count + 1);
+  });
+
+  // Get the target user's count
+  const userCount = rankingsCountMap.get(userId);
+  if (!userCount || userCount === 0) return null;
+
+  // Sort all users by count descending and find position
+  const sortedCounts = Array.from(rankingsCountMap.entries())
+    .sort((a, b) => b[1] - a[1]);
+
+  const position = sortedCounts.findIndex(([id]) => id === userId);
+  return position >= 0 ? position + 1 : null;
+}
+
 // Get user stats (films, watch time, rankings count)
 export async function getUserStats(userId: string): Promise<{
   totalFilms: number;

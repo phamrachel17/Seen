@@ -10,6 +10,7 @@ interface UserListItemProps {
   isLoading: boolean;
   onFollowPress: () => void;
   onUserPress?: () => void;
+  subtitle?: string;
 }
 
 export function UserListItem({
@@ -19,6 +20,7 @@ export function UserListItem({
   isLoading,
   onFollowPress,
   onUserPress,
+  subtitle,
 }: UserListItemProps) {
   const isCurrentUser = user.id === currentUserId;
 
@@ -43,7 +45,7 @@ export function UserListItem({
           {user.display_name || user.username}
         </Text>
         <Text style={styles.username} numberOfLines={1}>
-          @{user.username}
+          {subtitle || `@${user.username}`}
         </Text>
       </View>
 

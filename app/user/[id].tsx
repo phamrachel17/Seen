@@ -23,6 +23,7 @@ import {
   checkIfFollowing,
   followUser,
   unfollowUser,
+  getUserRankingPosition,
 } from '@/lib/follows';
 import { User, Movie, Review } from '@/types';
 
@@ -57,6 +58,7 @@ export default function UserProfileScreen() {
   const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowLoading, setIsFollowLoading] = useState(false);
+  const [rankingPosition, setRankingPosition] = useState<number | null>(null);
 
   const isOwnProfile = currentUser?.id === userId;
 
@@ -64,13 +66,14 @@ export default function UserProfileScreen() {
     if (!userId || !currentUser) return;
 
     try {
-      const [profile, userStats, counts, reviews, followingStatus] =
+      const [profile, userStats, counts, reviews, followingStatus, position] =
         await Promise.all([
           getUserProfile(userId),
           getUserStats(userId),
           getFollowCounts(userId),
           getUserRecentReviews(userId, currentUser.id, 6),
           checkIfFollowing(currentUser.id, userId),
+          getUserRankingPosition(userId),
         ]);
 
       if (profile) {
@@ -80,6 +83,7 @@ export default function UserProfileScreen() {
       setFollowCounts(counts);
       setRecentReviews(reviews);
       setIsFollowing(followingStatus);
+      setRankingPosition(position);
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
@@ -313,7 +317,7 @@ export default function UserProfileScreen() {
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>
-              {stats.rankingsCount > 0 ? stats.rankingsCount : '—'}
+              {rankingPosition ? `#${rankingPosition}` : '—'}
             </Text>
             <Text style={styles.statLabel}>RANKED</Text>
           </View>

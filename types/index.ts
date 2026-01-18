@@ -24,6 +24,27 @@ export interface Movie {
   collection_name?: string;  // e.g., "The Dark Knight Collection"
 }
 
+export interface CastMember {
+  id: number;
+  name: string;
+  character: string;
+  profile_url: string;
+}
+
+export interface CrewMember {
+  id: number;
+  name: string;
+  job: string;
+  department: string;
+  profile_url: string;
+}
+
+// Extended movie details returned from getMovieDetails (includes cast/crew)
+export interface MovieDetails extends Movie {
+  cast: CastMember[];
+  crew: CrewMember[];
+}
+
 export interface Review {
   id: string;
   user_id: string;
@@ -82,4 +103,36 @@ export interface FeedActivity {
   review?: Pick<Review, 'star_rating' | 'review_text'>;
   list_name?: string;
   created_at: string;
+}
+
+export interface Like {
+  id: string;
+  user_id: string;
+  review_id: string;
+  created_at: string;
+}
+
+export interface Comment {
+  id: string;
+  user_id: string;
+  review_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  // Joined data
+  user?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  actor_id: string;
+  type: 'like' | 'comment' | 'tagged' | 'follow';
+  review_id?: string;
+  comment_id?: string;
+  read: boolean;
+  created_at: string;
+  // Joined data
+  actor?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+  review?: Pick<Review, 'id' | 'movie_id'> & { movies?: Pick<Movie, 'id' | 'title' | 'poster_url'> };
 }

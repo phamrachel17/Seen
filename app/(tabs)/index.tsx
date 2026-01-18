@@ -3,21 +3,24 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   Pressable,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
+import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { FeedCard } from '@/components/feed-card';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, Review } from '@/types';
+import { getUnreadNotificationCount } from '@/lib/social';
+import { Movie, Review, User } from '@/types';
 
-interface ReviewWithMovie extends Review {
+interface FeedReview extends Review {
   movies: Movie;
+  users: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
 }
 
 export default function FeedScreen() {
@@ -25,39 +28,67 @@ export default function FeedScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [reviews, setReviews] = useState<ReviewWithMovie[]>([]);
+  const [reviews, setReviews] = useState<FeedReview[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const loadReviews = useCallback(async () => {
+  const loadFeed = useCallback(async () => {
     if (!user) {
       setIsLoading(false);
       return;
     }
 
     try {
+      // Get users the current user is following
+      const { data: followingData } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
+
+      const followingIds = followingData?.map((f) => f.following_id) || [];
+      const feedUserIds = [user.id, ...followingIds];
+
+      // Fetch reviews from the user and people they follow
+      // Don't order by created_at - we'll sort by most recent activity (created or updated)
       const { data, error } = await supabase
         .from('reviews')
         .select(`
           *,
-          movies (*)
+          movies (*),
+          users!reviews_user_id_fkey (id, username, display_name, profile_image_url)
         `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
+        .in('user_id', feedUserIds)
+        .or(`is_private.eq.false,user_id.eq.${user.id}`)
+        .limit(100);
 
       if (error) {
-        console.error('Error loading reviews:', error);
+        console.error('Error loading feed:', error);
         return;
       }
 
-      const reviewsWithMovies = (data || []).filter(
-        (item: ReviewWithMovie) => item.movies
-      ) as ReviewWithMovie[];
+      // Filter and sort by most recent activity (created_at or updated_at)
+      const feedReviews = (data || [])
+        .filter((item: FeedReview) => item.movies && item.users)
+        .sort((a, b) => {
+          // Get the most recent date for each review
+          const aDate = new Date(a.updated_at) > new Date(a.created_at)
+            ? new Date(a.updated_at)
+            : new Date(a.created_at);
+          const bDate = new Date(b.updated_at) > new Date(b.created_at)
+            ? new Date(b.updated_at)
+            : new Date(b.created_at);
+          return bDate.getTime() - aDate.getTime();
+        })
+        .slice(0, 50) as FeedReview[];
 
-      setReviews(reviewsWithMovies);
+      setReviews(feedReviews);
+
+      // Load unread notification count
+      const count = await getUnreadNotificationCount(user.id);
+      setUnreadCount(count);
     } catch (error) {
-      console.error('Error loading reviews:', error);
+      console.error('Error loading feed:', error);
     } finally {
       setIsLoading(false);
     }
@@ -65,40 +96,44 @@ export default function FeedScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadReviews();
-    }, [loadReviews])
+      loadFeed();
+    }, [loadFeed])
   );
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadReviews();
+    await loadFeed();
     setIsRefreshing(false);
   };
 
-  const navigateToMovie = (movieId: number) => {
-    router.push(`/movie/${movieId}`);
+  const navigateToNotifications = () => {
+    router.push('/notifications');
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
+  const renderItem = ({ item }: { item: FeedReview }) => (
+    <FeedCard review={item} onLikeChange={loadFeed} />
+  );
 
-  const renderStars = (rating: number) => {
+  const renderHeader = () => (
+    <Text style={styles.sectionTitle}>The Ledger</Text>
+  );
+
+  const renderEmpty = () => {
+    if (isLoading) return null;
+
     return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <IconSymbol
-            key={star}
-            name={star <= rating ? 'star.fill' : 'star'}
-            size={14}
-            color={star <= rating ? Colors.starFilled : Colors.starEmpty}
-          />
-        ))}
+      <View style={styles.emptyState}>
+        <IconSymbol name="film" size={48} color={Colors.textMuted} />
+        <Text style={styles.emptyStateTitle}>Your feed is empty</Text>
+        <Text style={styles.emptyStateText}>
+          Follow people and watch movies to see activity here
+        </Text>
+        <Pressable
+          style={styles.discoverButton}
+          onPress={() => router.push('/(tabs)/discover')}
+        >
+          <Text style={styles.discoverButtonText}>Discover Films & People</Text>
+        </Pressable>
       </View>
     );
   };
@@ -108,86 +143,41 @@ export default function FeedScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <Text style={styles.title}>Seen</Text>
-        <Pressable style={styles.iconButton}>
+        <Pressable style={styles.iconButton} onPress={navigateToNotifications}>
           <IconSymbol name="bell" size={22} color={Colors.text} />
+          {unreadCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </Text>
+            </View>
+          )}
         </Pressable>
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.stamp}
-          />
-        }
-      >
-        <Text style={styles.sectionTitle}>The Ledger</Text>
-
-        {!isLoading && reviews.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>
-              Your reviews will appear here
-            </Text>
-            <Pressable
-              style={styles.discoverButton}
-              onPress={() => router.push('/(tabs)/discover')}
-            >
-              <Text style={styles.discoverButtonText}>Discover Films</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.reviewsList}>
-            {reviews.map((review) => (
-              <Pressable
-                key={review.id}
-                style={({ pressed }) => [
-                  styles.reviewCard,
-                  pressed && styles.cardPressed,
-                ]}
-                onPress={() => navigateToMovie(review.movie_id)}
-              >
-                {/* Movie Poster */}
-                {review.movies.poster_url ? (
-                  <Image
-                    source={{ uri: review.movies.poster_url }}
-                    style={styles.poster}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <View style={[styles.poster, styles.posterPlaceholder]}>
-                    <Text style={styles.posterPlaceholderText}>
-                      {review.movies.title[0]}
-                    </Text>
-                  </View>
-                )}
-
-                {/* Review Content */}
-                <View style={styles.reviewContent}>
-                  <Text style={styles.activityLabel}>You reviewed</Text>
-                  <Text style={styles.movieTitle} numberOfLines={1}>
-                    {review.movies.title}
-                  </Text>
-                  <View style={styles.reviewMeta}>
-                    {renderStars(review.star_rating)}
-                    <Text style={styles.reviewDate}>
-                      {formatDate(review.created_at)}
-                    </Text>
-                  </View>
-                  {review.review_text && (
-                    <Text style={styles.reviewText} numberOfLines={2}>
-                      {review.review_text}
-                    </Text>
-                  )}
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.stamp} />
+        </View>
+      ) : (
+        <FlatList
+          data={reviews}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          ListHeaderComponent={renderHeader}
+          ListEmptyComponent={renderEmpty}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.stamp}
+            />
+          }
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+        />
+      )}
     </View>
   );
 }
@@ -211,11 +201,31 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: Spacing.xs,
+    position: 'relative',
   },
-  scrollView: {
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 10,
+    color: Colors.white,
+  },
+  loadingContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  scrollContent: {
+  listContent: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing['3xl'],
   },
@@ -223,95 +233,40 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.serifItalic,
     fontSize: FontSizes['2xl'],
     color: Colors.text,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
+  },
+  separator: {
+    height: Spacing.md,
   },
   emptyState: {
     paddingVertical: Spacing['4xl'],
     alignItems: 'center',
+    gap: Spacing.md,
+  },
+  emptyStateTitle: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.xl,
+    color: Colors.text,
   },
   emptyStateText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
-    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
   },
   discoverButton: {
+    marginTop: Spacing.md,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.stamp,
-    borderRadius: BorderRadius.sm,
+    borderRadius: 8,
   },
   discoverButtonText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.stamp,
     letterSpacing: 0.5,
-  },
-  reviewsList: {
-    gap: Spacing.lg,
-  },
-  reviewCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.cardBackground,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    gap: Spacing.md,
-  },
-  cardPressed: {
-    opacity: 0.8,
-  },
-  poster: {
-    width: 70,
-    height: 105,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.dust,
-  },
-  posterPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  posterPlaceholderText: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes.xl,
-    color: Colors.textMuted,
-  },
-  reviewContent: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  activityLabel: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-    marginBottom: 2,
-  },
-  movieTitle: {
-    fontFamily: Fonts.serifSemiBold,
-    fontSize: FontSizes.lg,
-    color: Colors.text,
-    marginBottom: Spacing.xs,
-  },
-  reviewMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  reviewDate: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-  },
-  reviewText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.textSecondary,
-    lineHeight: FontSizes.sm * 1.4,
   },
 });
