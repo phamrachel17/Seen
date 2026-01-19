@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   title: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },

@@ -1,4 +1,4 @@
-import { Movie, MovieDetails, CastMember, CrewMember } from '@/types';
+import { Movie, MovieDetails, CastMember, CrewMember, TVShow, TVShowDetails, Season, Episode } from '@/types';
 
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY ?? '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
@@ -67,6 +67,63 @@ interface TMDBCredits {
 interface TMDBSearchResponse {
   page: number;
   results: TMDBMovie[];
+  total_pages: number;
+  total_results: number;
+}
+
+// TV Show TMDB types
+interface TMDBTVShow {
+  id: number;
+  name: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  first_air_date: string;
+  genre_ids?: number[];
+  genres?: { id: number; name: string }[];
+  overview: string;
+  popularity: number;
+  vote_average: number;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+  episode_run_time?: number[];
+  created_by?: { id: number; name: string }[];
+  seasons?: TMDBSeason[];
+}
+
+interface TMDBSeason {
+  id: number;
+  season_number: number;
+  name: string;
+  overview: string;
+  poster_path: string | null;
+  air_date: string;
+  episode_count: number;
+}
+
+interface TMDBEpisode {
+  id: number;
+  episode_number: number;
+  season_number: number;
+  name: string;
+  overview: string;
+  still_path: string | null;
+  air_date: string;
+  runtime: number | null;
+}
+
+interface TMDBSeasonDetails {
+  id: number;
+  season_number: number;
+  name: string;
+  overview: string;
+  poster_path: string | null;
+  air_date: string;
+  episodes: TMDBEpisode[];
+}
+
+interface TMDBTVSearchResponse {
+  page: number;
+  results: TMDBTVShow[];
   total_pages: number;
   total_results: number;
 }
@@ -239,5 +296,214 @@ export async function getNowPlayingMovies(page: number = 1): Promise<{
   return {
     movies: data.results.map((m) => transformMovie(m)),
     totalPages: data.total_pages,
+  };
+}
+
+// ============================================
+// TV SHOW API FUNCTIONS
+// ============================================
+
+// Transform TMDB TV show to our TVShow type
+function transformTVShow(tmdbShow: TMDBTVShow, creator?: string): TVShow {
+  return {
+    id: tmdbShow.id,
+    title: tmdbShow.name,
+    poster_url: getImageUrl(tmdbShow.poster_path, 'poster', 'medium'),
+    backdrop_url: getImageUrl(tmdbShow.backdrop_path, 'backdrop', 'medium'),
+    release_year: tmdbShow.first_air_date
+      ? parseInt(tmdbShow.first_air_date.split('-')[0], 10)
+      : 0,
+    genres: tmdbShow.genres?.map((g) => g.name) ?? [],
+    creator: creator,
+    synopsis: tmdbShow.overview,
+    popularity_score: tmdbShow.popularity,
+    total_seasons: tmdbShow.number_of_seasons,
+    total_episodes: tmdbShow.number_of_episodes,
+    episode_runtime: tmdbShow.episode_run_time?.[0],
+  };
+}
+
+// Transform TMDB season to our Season type
+function transformSeason(tmdbSeason: TMDBSeason): Season {
+  return {
+    id: tmdbSeason.id,
+    season_number: tmdbSeason.season_number,
+    name: tmdbSeason.name,
+    overview: tmdbSeason.overview,
+    poster_url: getImageUrl(tmdbSeason.poster_path, 'poster', 'medium'),
+    air_date: tmdbSeason.air_date,
+    episode_count: tmdbSeason.episode_count,
+  };
+}
+
+// Transform TMDB episode to our Episode type
+function transformEpisode(tmdbEpisode: TMDBEpisode): Episode {
+  return {
+    id: tmdbEpisode.id,
+    episode_number: tmdbEpisode.episode_number,
+    season_number: tmdbEpisode.season_number,
+    name: tmdbEpisode.name,
+    overview: tmdbEpisode.overview,
+    still_url: tmdbEpisode.still_path ? getImageUrl(tmdbEpisode.still_path, 'backdrop', 'small') : '',
+    air_date: tmdbEpisode.air_date,
+    runtime: tmdbEpisode.runtime ?? undefined,
+  };
+}
+
+// Search TV shows by query
+export async function searchTVShows(query: string, page: number = 1): Promise<{
+  shows: TVShow[];
+  totalPages: number;
+  totalResults: number;
+}> {
+  if (!query.trim()) {
+    return { shows: [], totalPages: 0, totalResults: 0 };
+  }
+
+  const data = await tmdbFetch<TMDBTVSearchResponse>('/search/tv', {
+    query: query.trim(),
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  return {
+    shows: data.results.map((s) => transformTVShow(s)),
+    totalPages: data.total_pages,
+    totalResults: data.total_results,
+  };
+}
+
+// Get TV show details by ID (includes seasons)
+export async function getTVShowDetails(showId: number): Promise<TVShowDetails> {
+  // Fetch show details and credits in parallel
+  const [showData, creditsData] = await Promise.all([
+    tmdbFetch<TMDBTVShow>(`/tv/${showId}`),
+    tmdbFetch<TMDBCredits>(`/tv/${showId}/credits`),
+  ]);
+
+  // Find creator from created_by field
+  const creator = showData.created_by?.[0]?.name;
+
+  // Extract top 10 cast members
+  const cast: CastMember[] = creditsData.cast
+    .sort((a, b) => a.order - b.order)
+    .slice(0, 10)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      character: c.character,
+      profile_url: getProfileImageUrl(c.profile_path),
+    }));
+
+  // Extract key crew members
+  const seenCrewIds = new Set<number>();
+  const crew: CrewMember[] = creditsData.crew
+    .filter((c) => KEY_CREW_JOBS.includes(c.job) || c.job === 'Executive Producer')
+    .filter((c) => {
+      if (seenCrewIds.has(c.id)) return false;
+      seenCrewIds.add(c.id);
+      return true;
+    })
+    .slice(0, 10)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      job: c.job,
+      department: c.department,
+      profile_url: getProfileImageUrl(c.profile_path),
+    }));
+
+  // Transform seasons (filter out season 0 which is usually "Specials")
+  const seasons: Season[] = (showData.seasons ?? [])
+    .filter((s) => s.season_number > 0)
+    .map((s) => transformSeason(s));
+
+  return {
+    ...transformTVShow(showData, creator),
+    cast,
+    crew,
+    seasons,
+  };
+}
+
+// Get season details with episodes
+export async function getSeasonDetails(showId: number, seasonNumber: number): Promise<{
+  season: Season;
+  episodes: Episode[];
+}> {
+  const data = await tmdbFetch<TMDBSeasonDetails>(`/tv/${showId}/season/${seasonNumber}`);
+
+  return {
+    season: {
+      id: data.id,
+      season_number: data.season_number,
+      name: data.name,
+      overview: data.overview,
+      poster_url: getImageUrl(data.poster_path, 'poster', 'medium'),
+      air_date: data.air_date,
+      episode_count: data.episodes.length,
+    },
+    episodes: data.episodes.map((e) => transformEpisode(e)),
+  };
+}
+
+// Get popular TV shows
+export async function getPopularTVShows(page: number = 1): Promise<{
+  shows: TVShow[];
+  totalPages: number;
+}> {
+  const data = await tmdbFetch<TMDBTVSearchResponse>('/tv/popular', {
+    page: page.toString(),
+  });
+
+  return {
+    shows: data.results.map((s) => transformTVShow(s)),
+    totalPages: data.total_pages,
+  };
+}
+
+// Get trending TV shows (this week)
+export async function getTrendingTVShows(): Promise<TVShow[]> {
+  const data = await tmdbFetch<TMDBTVSearchResponse>('/trending/tv/week');
+  return data.results.map((s) => transformTVShow(s));
+}
+
+// Multi-search (movies and TV shows combined)
+export async function searchAll(query: string, page: number = 1): Promise<{
+  results: (Movie | TVShow)[];
+  totalPages: number;
+  totalResults: number;
+}> {
+  if (!query.trim()) {
+    return { results: [], totalPages: 0, totalResults: 0 };
+  }
+
+  interface TMDBMultiSearchResult {
+    page: number;
+    results: (TMDBMovie & TMDBTVShow & { media_type: 'movie' | 'tv' | 'person' })[];
+    total_pages: number;
+    total_results: number;
+  }
+
+  const data = await tmdbFetch<TMDBMultiSearchResult>('/search/multi', {
+    query: query.trim(),
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  const results = data.results
+    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
+    .map((r) => {
+      if (r.media_type === 'movie') {
+        return { ...transformMovie(r as TMDBMovie), content_type: 'movie' as const };
+      } else {
+        return { ...transformTVShow(r as TMDBTVShow), content_type: 'tv' as const };
+      }
+    });
+
+  return {
+    results,
+    totalPages: data.total_pages,
+    totalResults: data.total_results,
   };
 }

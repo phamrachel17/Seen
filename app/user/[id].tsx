@@ -14,7 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { ProfileListRow } from '@/components/profile-list-row';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 import {
   getUserProfile,
   getUserStats,
@@ -59,6 +61,7 @@ export default function UserProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowLoading, setIsFollowLoading] = useState(false);
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
+  const [watchlistCount, setWatchlistCount] = useState(0);
 
   const isOwnProfile = currentUser?.id === userId;
 
@@ -84,6 +87,13 @@ export default function UserProfileScreen() {
       setRecentReviews(reviews);
       setIsFollowing(followingStatus);
       setRankingPosition(position);
+
+      // Load watchlist count
+      const { count: wlCount } = await supabase
+        .from('bookmarks')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      setWatchlistCount(wlCount || 0);
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
@@ -147,7 +157,7 @@ export default function UserProfileScreen() {
   };
 
   const navigateToMovie = (movieId: number) => {
-    router.push(`/movie/${movieId}`);
+    router.push(`/title/${movieId}?type=movie` as any);
   };
 
   const handleBack = () => {
@@ -267,7 +277,7 @@ export default function UserProfileScreen() {
               </Pressable>
             </View>
 
-            {/* Follow Button - Under follower/following counts */}
+            {/* Follow Button */}
             {!isOwnProfile && (
               <Pressable
                 style={({ pressed }) => [
@@ -321,6 +331,23 @@ export default function UserProfileScreen() {
             </Text>
             <Text style={styles.statLabel}>RANKED</Text>
           </View>
+        </View>
+
+        {/* Lists */}
+        <View style={styles.listsSection}>
+          <Text style={styles.sectionLabel}>LISTS</Text>
+          <ProfileListRow
+            title="Rankings"
+            count={stats.rankingsCount}
+            onPress={() => router.push(`/rankings?userId=${userId}`)}
+            icon="list.number"
+          />
+          <ProfileListRow
+            title="Watchlist"
+            count={watchlistCount}
+            onPress={() => router.push(`/watchlist?userId=${userId}`)}
+            icon="bookmark"
+          />
         </View>
 
         {/* Recent Activity */}
@@ -436,7 +463,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['2xl'],
     color: Colors.stamp,
   },
@@ -462,7 +489,7 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
   avatarWrapper: {
-    position: 'relative',
+    flex: 1,
     alignItems: 'center',
   },
   usernameUnderAvatar: {
@@ -518,7 +545,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 36,
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
   },
   notFollowingButton: {
     backgroundColor: Colors.stamp,
@@ -566,6 +594,10 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     backgroundColor: Colors.border,
+  },
+  listsSection: {
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
   },
   section: {
     marginTop: Spacing.xl,

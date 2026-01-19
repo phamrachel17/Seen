@@ -7,6 +7,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { getReviewLikes, toggleLike, getCommentCount, createNotification } from '@/lib/social';
+import { getWatchDates } from '@/lib/watch-history';
 import { useAuth } from '@/lib/auth-context';
 import { Movie, Review, User } from '@/types';
 
@@ -28,6 +29,7 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
   const [isLiked, setIsLiked] = useState(false);
   const [isLikeLoading, setIsLikeLoading] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
+  const [watchDates, setWatchDates] = useState<string[]>([]);
 
   const isOwnReview = user?.id === review.user_id;
   // Check if review was edited (updated_at is after created_at)
@@ -37,6 +39,7 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
 
   useEffect(() => {
     loadInteractions();
+    loadWatchDates();
   }, [review.id]);
 
   const loadInteractions = async () => {
@@ -47,6 +50,16 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
     setLikeCount(likes.count);
     setIsLiked(likes.likedByUser);
     setCommentCount(comments);
+  };
+
+  const loadWatchDates = async () => {
+    const dates = await getWatchDates(review.user_id, review.movie_id);
+    setWatchDates(dates.map(d => d.watched_at));
+  };
+
+  const formatWatchDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   const handleLikePress = useCallback(async () => {
@@ -156,7 +169,13 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
             <View style={styles.timestampRow}>
               <Text style={styles.timestamp}>{formatDate(displayDate)}</Text>
               {isEdited && (
-                <Text style={styles.editedLabel}>(edited)</Text>
+                <Text style={styles.updateTypeLabel}>
+                  {review.last_update_type === 'rating_changed' && '· Updated rating'}
+                  {review.last_update_type === 'review_added' && '· Added review'}
+                  {review.last_update_type === 'review_updated' && '· Updated review'}
+                  {review.last_update_type === 'watch_date_added' && '· Rewatched'}
+                  {!review.last_update_type && '· Edited'}
+                </Text>
               )}
             </View>
           </View>
@@ -185,7 +204,6 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
           </Text>
           <View style={styles.ratingRow}>
             {renderStars(review.star_rating)}
-            <Text style={styles.yearText}>({review.movies.release_year})</Text>
           </View>
           {review.review_text && (
             <Text style={styles.reviewText} numberOfLines={3}>
@@ -198,6 +216,16 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
       {/* Watched With */}
       {review.tagged_friends && review.tagged_friends.length > 0 && (
         <FriendChipsDisplay userIds={review.tagged_friends} />
+      )}
+
+      {/* Watch Dates */}
+      {watchDates.length > 0 && (
+        <View style={styles.watchDatesRow}>
+          <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
+          <Text style={styles.watchDatesText}>
+            Watched {watchDates.map(d => formatWatchDate(d)).join(', ')}
+          </Text>
+        </View>
       )}
 
       {/* Actions Row */}
@@ -281,11 +309,10 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
   },
-  editedLabel: {
+  updateTypeLabel: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
+    color: Colors.stamp,
   },
   movieContent: {
     flexDirection: 'row',
@@ -326,7 +353,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 2,
   },
-  yearText: {
+  watchDatesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  watchDatesText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textMuted,

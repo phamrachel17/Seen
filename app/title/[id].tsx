@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,118 +11,180 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { ProfileAvatar } from '@/components/profile-avatar';
-import { getMovieDetails } from '@/lib/tmdb';
-import { getMovieAverageRating, getFriendsReviewsForMovie, FriendReview } from '@/lib/social';
-import { getWatchDates } from '@/lib/watch-history';
+import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
+import { getContentByTmdbId, ensureContentExists } from '@/lib/content';
+import {
+  getUserCompletedActivity,
+  getUserInProgressActivity,
+  getFriendsActivitiesForContent,
+  formatProgress,
+} from '@/lib/activity';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { MovieDetails, Review, Ranking, WatchHistoryEntry } from '@/types';
+import { getFollowingIds } from '@/lib/follows';
+import {
+  MovieDetails,
+  TVShowDetails,
+  Content,
+  Activity,
+  ContentType,
+  Ranking,
+} from '@/types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HEADER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.35);
 const HEADER_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.45);
 
-export default function MovieDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function TitleDetailScreen() {
+  const { id, type } = useLocalSearchParams<{ id: string; type?: ContentType }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  const [movie, setMovie] = useState<MovieDetails | null>(null);
+  // Content state
+  const [content, setContent] = useState<Content | null>(null);
+  const [movieDetails, setMovieDetails] = useState<MovieDetails | null>(null);
+  const [tvDetails, setTVDetails] = useState<TVShowDetails | null>(null);
+
+  // UI state
   const [isLoading, setIsLoading] = useState(true);
   const [isBookmarked, setIsBookmarked] = useState(false);
-  const [userReview, setUserReview] = useState<Review | null>(null);
-  const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [isTogglingBookmark, setIsTogglingBookmark] = useState(false);
+
+  // Activity state
+  const [completedActivity, setCompletedActivity] = useState<Activity | null>(null);
+  const [inProgressActivity, setInProgressActivity] = useState<Activity | null>(null);
+  const [userRanking, setUserRanking] = useState<Ranking | null>(null);
+  const [friendsActivities, setFriendsActivities] = useState<Activity[]>([]);
+
+  // Community rating
   const [communityRating, setCommunityRating] = useState<{
     average: number;
     count: number;
   } | null>(null);
-  const [friendsReviews, setFriendsReviews] = useState<FriendReview[]>([]);
-  const [userWatchDates, setUserWatchDates] = useState<WatchHistoryEntry[]>([]);
 
   useEffect(() => {
     if (id) {
-      loadMovie(parseInt(id, 10));
+      loadContent(parseInt(id, 10), type || 'movie');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, type]);
 
-  const loadMovie = async (movieId: number) => {
+  // Reload user data when screen regains focus (after returning from log-activity)
+  useFocusEffect(
+    useCallback(() => {
+      if (user && content) {
+        loadUserData(content.id, content.tmdb_id);
+      }
+    }, [user, content])
+  );
+
+  const loadContent = async (tmdbId: number, contentType: ContentType) => {
     try {
       setIsLoading(true);
 
-      // Fetch movie details from TMDB and community rating in parallel
-      const [movieData, ratingData] = await Promise.all([
-        getMovieDetails(movieId),
-        getMovieAverageRating(movieId),
-      ]);
-      setMovie(movieData);
-      setCommunityRating(ratingData);
-
-      // Check user's bookmark, review, ranking status, friends' reviews, and watch dates
-      if (user) {
-        const [, , , friendReviews, watchDates] = await Promise.all([
-          checkBookmarkStatus(movieId),
-          loadUserReview(movieId),
-          loadUserRanking(movieId),
-          getFriendsReviewsForMovie(user.id, movieId),
-          getWatchDates(user.id, movieId),
-        ]);
-        setFriendsReviews(friendReviews);
-        setUserWatchDates(watchDates);
+      // Load content details from TMDB
+      if (contentType === 'movie') {
+        const details = await getMovieDetails(tmdbId);
+        setMovieDetails(details);
+      } else {
+        const details = await getTVShowDetails(tmdbId);
+        setTVDetails(details);
       }
+
+      // Ensure content exists in DB
+      const contentRecord = await ensureContentExists(tmdbId, contentType);
+      setContent(contentRecord);
+
+      if (!contentRecord) return;
+
+      // Load user data
+      if (user) {
+        await loadUserData(contentRecord.id, tmdbId);
+      }
+
+      // Load community rating
+      await loadCommunityRating(contentRecord.id);
     } catch (error) {
-      console.error('Error loading movie:', error);
+      console.error('Error loading content:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const checkBookmarkStatus = async (movieId: number) => {
+  const loadUserData = async (contentId: number, tmdbId: number) => {
+    if (!user) return;
+
+    try {
+      // Load user's activities, bookmark, ranking, and friends' activities in parallel
+      const followingIds = await getFollowingIds(user.id);
+
+      const [completed, inProgress, bookmark, ranking, friendsActs] = await Promise.all([
+        getUserCompletedActivity(user.id, contentId),
+        getUserInProgressActivity(user.id, contentId),
+        checkBookmarkStatus(tmdbId),
+        loadUserRanking(tmdbId),
+        getFriendsActivitiesForContent(user.id, contentId, followingIds),
+      ]);
+
+      setCompletedActivity(completed);
+      setInProgressActivity(inProgress);
+      setIsBookmarked(!!bookmark);
+      setUserRanking(ranking);
+      setFriendsActivities(friendsActs.slice(0, 5)); // Limit to 5 friends
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const checkBookmarkStatus = async (tmdbId: number): Promise<boolean> => {
     const { data } = await supabase
       .from('bookmarks')
       .select('id')
       .eq('user_id', user?.id)
-      .eq('movie_id', movieId)
+      .eq('movie_id', tmdbId)
       .single();
 
-    setIsBookmarked(!!data);
+    return !!data;
   };
 
-  const loadUserReview = async (movieId: number) => {
-    const { data } = await supabase
-      .from('reviews')
-      .select('*')
-      .eq('user_id', user?.id)
-      .eq('movie_id', movieId)
-      .single();
-
-    setUserReview(data);
-  };
-
-  const loadUserRanking = async (movieId: number) => {
+  const loadUserRanking = async (tmdbId: number): Promise<Ranking | null> => {
     const { data } = await supabase
       .from('rankings')
       .select('*')
       .eq('user_id', user?.id)
-      .eq('movie_id', movieId)
+      .eq('movie_id', tmdbId)
       .single();
 
-    setUserRanking(data);
+    return data;
+  };
+
+  const loadCommunityRating = async (contentId: number) => {
+    const { data } = await supabase
+      .from('activity_log')
+      .select('star_rating')
+      .eq('content_id', contentId)
+      .eq('status', 'completed')
+      .not('star_rating', 'is', null);
+
+    if (data && data.length > 0) {
+      const ratings = data.map((d) => d.star_rating as number);
+      const average = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+      setCommunityRating({ average, count: ratings.length });
+    }
   };
 
   const toggleBookmark = async () => {
-    if (!movie || !user || isTogglingBookmark) return;
+    if (!content || !user || isTogglingBookmark) return;
 
     setIsTogglingBookmark(true);
 
@@ -132,13 +194,13 @@ export default function MovieDetailScreen() {
           .from('bookmarks')
           .delete()
           .eq('user_id', user.id)
-          .eq('movie_id', movie.id);
+          .eq('movie_id', content.tmdb_id);
         setIsBookmarked(false);
       } else {
-        await cacheMovie(movie);
         await supabase.from('bookmarks').insert({
           user_id: user.id,
-          movie_id: movie.id,
+          movie_id: content.tmdb_id,
+          content_id: content.id,
         });
         setIsBookmarked(true);
       }
@@ -149,42 +211,51 @@ export default function MovieDetailScreen() {
     }
   };
 
-  const cacheMovie = async (movieData: MovieDetails) => {
-    await supabase.from('movies').upsert({
-      id: movieData.id,
-      title: movieData.title,
-      poster_url: movieData.poster_url,
-      backdrop_url: movieData.backdrop_url,
-      release_year: movieData.release_year,
-      genres: movieData.genres,
-      director: movieData.director,
-      synopsis: movieData.synopsis,
-      popularity_score: movieData.popularity_score,
-      runtime_minutes: movieData.runtime_minutes,
-    });
-  };
-
-  const openReviewModal = () => {
-    if (movie) {
-      router.push(`/review/${movie.id}`);
+  const openLogActivity = (editDirectly?: boolean, editInProgress?: boolean) => {
+    if (content) {
+      const params = new URLSearchParams();
+      if (editDirectly) params.append('editMode', 'true');
+      if (editInProgress) params.append('editInProgress', 'true');
+      const query = params.toString() ? `?${params.toString()}` : '';
+      router.push(`/log-activity/${content.id}${query}`);
     }
   };
 
-  // Animated header height - expands when pulling down
+  // Computed values
+  const details = movieDetails || tvDetails;
+  const title = details?.title || content?.title || '';
+  const backdropUrl = details?.backdrop_url || content?.backdrop_url;
+  const posterUrl = details?.poster_url || content?.poster_url;
+  const releaseYear = details?.release_year || content?.release_year;
+  const genres = details?.genres || content?.genres || [];
+  const synopsis = details?.synopsis || content?.synopsis;
+  const contentType = type || content?.content_type || 'movie';
+
+  // Movie-specific
+  const director = movieDetails?.director || content?.director;
+  const runtime = movieDetails?.runtime_minutes || content?.runtime_minutes;
+
+  // TV-specific
+  const creator = tvDetails?.creator;
+  const totalSeasons = tvDetails?.total_seasons || content?.total_seasons;
+  const totalEpisodes = tvDetails?.total_episodes || content?.total_episodes;
+
+  const cast = details?.cast || [];
+  const crew = details?.crew || [];
+
+  // Animated header
   const headerHeight = scrollY.interpolate({
     inputRange: [-100, 0],
     outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
     extrapolate: 'clamp',
   });
 
-  // Scale image when pulling down for stretch effect
   const imageScale = scrollY.interpolate({
     inputRange: [-100, 0],
     outputRange: [1.3, 1],
     extrapolate: 'clamp',
   });
 
-  // Translate image to keep it centered when scaling
   const imageTranslateY = scrollY.interpolate({
     inputRange: [-100, 0],
     outputRange: [-50, 0],
@@ -199,10 +270,10 @@ export default function MovieDetailScreen() {
     );
   }
 
-  if (!movie) {
+  if (!details && !content) {
     return (
       <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
-        <Text style={styles.errorText}>Movie not found</Text>
+        <Text style={styles.errorText}>Content not found</Text>
         <Pressable onPress={() => router.back()}>
           <Text style={styles.backLink}>Go back</Text>
         </Pressable>
@@ -210,8 +281,8 @@ export default function MovieDetailScreen() {
     );
   }
 
-  // Use backdrop for widescreen header, fall back to poster
-  const headerImageUrl = movie.backdrop_url || movie.poster_url;
+  const headerImageUrl = backdropUrl || posterUrl;
+  const hasActivity = completedActivity || inProgressActivity;
 
   return (
     <View style={styles.container}>
@@ -237,10 +308,9 @@ export default function MovieDetailScreen() {
           </Animated.View>
         ) : (
           <View style={styles.headerPlaceholder}>
-            <Text style={styles.headerPlaceholderText}>{movie.title[0]}</Text>
+            <Text style={styles.headerPlaceholderText}>{title[0]}</Text>
           </View>
         )}
-        {/* Gradient overlay for smooth fade to background */}
         <LinearGradient
           colors={['transparent', 'transparent', Colors.background]}
           locations={[0, 0.5, 1]}
@@ -248,7 +318,7 @@ export default function MovieDetailScreen() {
         />
       </Animated.View>
 
-      {/* Back Button Only */}
+      {/* Back Button */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.white} />
@@ -266,11 +336,11 @@ export default function MovieDetailScreen() {
           { useNativeDriver: false }
         )}
       >
-        {/* Movie Info */}
+        {/* Title Info */}
         <View style={styles.infoContainer}>
-          <Text style={styles.title}>{movie.title}</Text>
+          <Text style={styles.title}>{title}</Text>
 
-          {/* Rating Row: Stars + Numeric + Count ... Bookmark */}
+          {/* Rating Row */}
           <View style={styles.ratingRow}>
             <View style={styles.ratingLeft}>
               {communityRating ? (
@@ -305,59 +375,67 @@ export default function MovieDetailScreen() {
             </Pressable>
           </View>
 
-          {/* Meta Row: Year • Director • Runtime */}
+          {/* Meta Row */}
           <View style={styles.metaRow}>
             <View style={styles.metaLeft}>
-              {movie.release_year ? (
-                <Text style={styles.year}>{movie.release_year}</Text>
-              ) : null}
-              {movie.director ? (
+              {releaseYear ? <Text style={styles.year}>{releaseYear}</Text> : null}
+              {contentType === 'movie' && director ? (
                 <>
                   <Text style={styles.metaDivider}>•</Text>
-                  <Text style={styles.director}>{movie.director}</Text>
+                  <Text style={styles.director}>{director}</Text>
                 </>
               ) : null}
-              {movie.runtime_minutes ? (
+              {contentType === 'tv' && creator ? (
                 <>
                   <Text style={styles.metaDivider}>•</Text>
-                  <Text style={styles.runtime}>{movie.runtime_minutes}m</Text>
+                  <Text style={styles.director}>{creator}</Text>
+                </>
+              ) : null}
+              {contentType === 'movie' && runtime ? (
+                <>
+                  <Text style={styles.metaDivider}>•</Text>
+                  <Text style={styles.runtime}>{runtime}m</Text>
+                </>
+              ) : null}
+              {contentType === 'tv' && totalSeasons ? (
+                <>
+                  <Text style={styles.metaDivider}>•</Text>
+                  <Text style={styles.runtime}>{totalSeasons} Seasons</Text>
                 </>
               ) : null}
             </View>
           </View>
 
-          {movie.genres && movie.genres.length > 0 ? (
+          {/* Genres */}
+          {genres.length > 0 && (
             <View style={styles.genresRow}>
-              {movie.genres.slice(0, 3).map((genre, index) => (
+              {genres.slice(0, 3).map((genre, index) => (
                 <View key={index} style={styles.genreTag}>
                   <Text style={styles.genreText}>{genre}</Text>
                 </View>
               ))}
             </View>
-          ) : null}
-
-          {movie.synopsis ? (
-            <Text style={styles.synopsis}>{movie.synopsis}</Text>
-          ) : null}
-
-          {/* Action Button - only show if no review yet */}
-          {!userReview && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.reviewButton,
-                pressed && styles.buttonPressed,
-              ]}
-              onPress={openReviewModal}
-            >
-              <Text style={styles.reviewButtonText}>Write a Review</Text>
-            </Pressable>
           )}
 
-          {/* User's Review Section */}
-          {userReview && (
+          {/* Synopsis */}
+          {synopsis && <Text style={styles.synopsis}>{synopsis}</Text>}
+
+          {/* Log Activity Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.logActivityButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => openLogActivity()}
+          >
+            <Text style={styles.logActivityButtonText}>Log Activity</Text>
+          </Pressable>
+
+          {/* Your Take Section (Completed) */}
+          {completedActivity && (
             <View style={styles.yourTakeSection}>
               <View style={styles.yourTakeHeader}>
-                <Text style={styles.yourTakeLabel}>Your Take:</Text>
+                <Text style={styles.sectionLabel}>Your Take:</Text>
                 {userRanking && (
                   <View style={styles.rankingBadge}>
                     <Text style={styles.rankingBadgeText}>#{userRanking.rank_position}</Text>
@@ -366,36 +444,82 @@ export default function MovieDetailScreen() {
               </View>
               <Pressable
                 style={({ pressed }) => [
-                  styles.userReviewContainer,
-                  pressed && styles.reviewPressed,
+                  styles.activityCard,
+                  pressed && styles.cardPressed,
                 ]}
-                onPress={openReviewModal}
+                onPress={() => openLogActivity(true)}
               >
-                <View style={styles.reviewHeader}>
+                <View style={styles.activityHeader}>
                   <View style={styles.starsRow}>
                     {[1, 2, 3, 4, 5].map((star) => (
                       <IconSymbol
                         key={star}
-                        name={star <= userReview.star_rating ? 'star.fill' : 'star'}
+                        name={star <= (completedActivity.star_rating || 0) ? 'star.fill' : 'star'}
                         size={16}
-                        color={star <= userReview.star_rating ? Colors.starFilled : Colors.starEmpty}
+                        color={star <= (completedActivity.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
                       />
                     ))}
                   </View>
                 </View>
-                {userReview.review_text ? (
-                  <Text style={styles.reviewText}>{userReview.review_text}</Text>
-                ) : null}
-                {userReview.tagged_friends && userReview.tagged_friends.length > 0 && (
-                  <FriendChipsDisplay userIds={userReview.tagged_friends} />
+                {completedActivity.review_text && (
+                  <Text style={styles.reviewText}>{completedActivity.review_text}</Text>
                 )}
-                {userWatchDates.length > 0 && (
-                  <View style={styles.watchDatesSection}>
+                {completedActivity.tagged_friends && completedActivity.tagged_friends.length > 0 && (
+                  <FriendChipsDisplay userIds={completedActivity.tagged_friends} />
+                )}
+                {completedActivity.watch_date && (
+                  <View style={styles.watchDateRow}>
                     <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
-                    <Text style={styles.watchDatesText}>
-                      Watched {userWatchDates.map(d =>
-                        new Date(d.watched_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      ).join(', ')}
+                    <Text style={styles.watchDateText}>
+                      Watched {new Date(completedActivity.watch_date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.editHint}>
+                  <IconSymbol name="pencil" size={12} color={Colors.textMuted} />
+                  <Text style={styles.editHintText}>Tap to edit</Text>
+                </View>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Your Progress Section (In Progress) */}
+          {inProgressActivity && (
+            <View style={styles.yourProgressSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionLabel}>Your Progress:</Text>
+                <Pressable onPress={() => router.push(`/activity-history/${content?.id}`)}>
+                  <Text style={styles.viewAllLink}>View All</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.activityCard,
+                  pressed && styles.cardPressed,
+                ]}
+                onPress={() => openLogActivity(false, true)}
+              >
+                <View style={styles.progressHeader}>
+                  <IconSymbol name="play.circle.fill" size={20} color={Colors.textMuted} />
+                  <Text style={styles.progressStatus}>In Progress</Text>
+                </View>
+                <Text style={styles.progressText}>
+                  {formatProgress(inProgressActivity) || 'Started watching'}
+                </Text>
+                {inProgressActivity.note && (
+                  <Text style={styles.progressNote}>"{inProgressActivity.note}"</Text>
+                )}
+                {inProgressActivity.watch_date && (
+                  <View style={styles.watchDateRow}>
+                    <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
+                    <Text style={styles.watchDateText}>
+                      {new Date(inProgressActivity.watch_date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
                     </Text>
                   </View>
                 )}
@@ -408,51 +532,61 @@ export default function MovieDetailScreen() {
           )}
         </View>
 
-        {/* Friends' Takes Section */}
-        {friendsReviews.length > 0 && (
-          <View style={styles.friendsReviewsSection}>
-            <Text style={styles.friendsReviewsLabel}>Friends&apos; Take:</Text>
-            {friendsReviews.map((review) => (
-              <View key={review.id} style={styles.friendReviewCard}>
-                <View style={styles.friendReviewHeader}>
+        {/* Friends' Activity Section */}
+        {friendsActivities.length > 0 && (
+          <View style={styles.friendsSection}>
+            <Text style={styles.sectionLabel}>Friends&apos; Activity:</Text>
+            {friendsActivities.map((activity) => (
+              <View key={activity.id} style={styles.friendActivityCard}>
+                <View style={styles.friendActivityHeader}>
                   <Pressable
                     style={styles.friendInfo}
-                    onPress={() => router.push(`/user/${review.user_id}`)}
+                    onPress={() => router.push(`/user/${activity.user_id}`)}
                   >
                     <ProfileAvatar
-                      imageUrl={review.users.profile_image_url}
-                      username={review.users.username}
+                      imageUrl={activity.user?.profile_image_url}
+                      username={activity.user?.username || ''}
                       size="small"
                       variant="circle"
                     />
                     <Text style={styles.friendName}>
-                      {review.users.display_name || review.users.username}
+                      {activity.user?.display_name || activity.user?.username}
                     </Text>
                   </Pressable>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <IconSymbol
-                        key={star}
-                        name={star <= review.star_rating ? 'star.fill' : 'star'}
-                        size={12}
-                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
-                      />
-                    ))}
-                  </View>
+                  {activity.status === 'completed' ? (
+                    <View style={styles.starsRow}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <IconSymbol
+                          key={star}
+                          name={star <= (activity.star_rating || 0) ? 'star.fill' : 'star'}
+                          size={12}
+                          color={star <= (activity.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
+                        />
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.inProgressBadge}>
+                      <IconSymbol name="play.circle.fill" size={12} color={Colors.textMuted} />
+                      <Text style={styles.inProgressBadgeText}>
+                        {formatProgress(activity) || 'In Progress'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                {review.review_text && (
-                  <Text style={styles.friendReviewText}>{review.review_text}</Text>
+                {activity.review_text && (
+                  <Text style={styles.friendReviewText}>{activity.review_text}</Text>
                 )}
-                {review.tagged_friends && review.tagged_friends.length > 0 && (
-                  <FriendChipsDisplay userIds={review.tagged_friends} />
+                {activity.note && (
+                  <Text style={styles.friendNoteText}>"{activity.note}"</Text>
                 )}
-                {review.watchDates && review.watchDates.length > 0 && (
-                  <View style={styles.watchDatesSection}>
+                {activity.watch_date && (
+                  <View style={styles.watchDateRow}>
                     <IconSymbol name="calendar" size={12} color={Colors.textMuted} />
-                    <Text style={styles.watchDatesText}>
-                      Watched {review.watchDates.map(d =>
-                        new Date(d.watched_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      ).join(', ')}
+                    <Text style={styles.watchDateText}>
+                      {new Date(activity.watch_date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
                     </Text>
                   </View>
                 )}
@@ -462,8 +596,8 @@ export default function MovieDetailScreen() {
         )}
 
         {/* Cast & Crew Section */}
-        {(movie.cast?.length > 0 || movie.crew?.length > 0) && (
-          <CastCrewSection cast={movie.cast || []} crew={movie.crew || []} />
+        {(cast.length > 0 || crew.length > 0) && (
+          <CastCrewSection cast={cast} crew={crew} />
         )}
       </Animated.ScrollView>
     </View>
@@ -587,6 +721,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
+  starsRow: {
+    flexDirection: 'row',
+    gap: 2,
+  },
   ratingNumeric: {
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes.lg,
@@ -663,24 +801,27 @@ const styles = StyleSheet.create({
     lineHeight: FontSizes.md * 1.6,
     marginBottom: Spacing.xl,
   },
-  reviewButton: {
+  logActivityButton: {
     paddingVertical: Spacing.lg,
     borderRadius: BorderRadius.sm,
     alignItems: 'center',
     backgroundColor: Colors.stamp,
     marginBottom: Spacing.xl,
   },
-  buttonPressed: {
-    opacity: 0.8,
-  },
-  reviewButtonText: {
+  logActivityButtonText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.white,
     letterSpacing: 1,
   },
+  buttonPressed: {
+    opacity: 0.8,
+  },
   yourTakeSection: {
-    marginTop: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  yourProgressSection: {
+    marginBottom: Spacing.xl,
   },
   yourTakeHeader: {
     flexDirection: 'row',
@@ -688,10 +829,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: Spacing.md,
   },
-  yourTakeLabel: {
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  sectionLabel: {
     fontFamily: Fonts.serifSemiBold,
     fontSize: FontSizes.lg,
     color: Colors.text,
+  },
+  viewAllLink: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
   },
   rankingBadge: {
     width: 32,
@@ -706,20 +858,60 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.white,
   },
-  userReviewContainer: {
+  activityCard: {
     paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing.lg,
     backgroundColor: Colors.cardBackground,
     borderRadius: BorderRadius.md,
   },
-  reviewHeader: {
+  cardPressed: {
+    opacity: 0.8,
+  },
+  activityHeader: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
-  reviewPressed: {
-    opacity: 0.8,
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  progressStatus: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
+  },
+  progressText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  progressNote: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: Spacing.sm,
+  },
+  reviewText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    lineHeight: FontSizes.md * 1.5,
+  },
+  watchDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  watchDateText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
   },
   editHint: {
     flexDirection: 'row',
@@ -732,44 +924,17 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
   },
-  starsRow: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  reviewText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-    lineHeight: FontSizes.md * 1.5,
-  },
-  watchDatesSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginTop: Spacing.sm,
-  },
-  watchDatesText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-  },
-  friendsReviewsSection: {
-    marginTop: Spacing.xl,
+  friendsSection: {
+    marginTop: Spacing.lg,
     paddingHorizontal: Spacing.xl,
   },
-  friendsReviewsLabel: {
-    fontFamily: Fonts.serifSemiBold,
-    fontSize: FontSizes.lg,
-    color: Colors.text,
-    marginBottom: Spacing.md,
-  },
-  friendReviewCard: {
+  friendActivityCard: {
     backgroundColor: Colors.cardBackground,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
-    marginBottom: Spacing.md,
+    marginTop: Spacing.md,
   },
-  friendReviewHeader: {
+  friendActivityHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -785,10 +950,26 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.text,
   },
+  inProgressBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  inProgressBadgeText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+  },
   friendReviewText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textSecondary,
     lineHeight: FontSizes.sm * 1.5,
+  },
+  friendNoteText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
   },
 });

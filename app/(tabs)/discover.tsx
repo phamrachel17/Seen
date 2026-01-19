@@ -15,13 +15,16 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { MovieGrid } from '@/components/movie-card';
 import { UserListItem } from '@/components/user-list-item';
-import { searchMovies, getTrendingMovies } from '@/lib/tmdb';
+import { searchAll, getTrendingMovies, getTrendingTVShows } from '@/lib/tmdb';
 import { searchUsers, followUser, unfollowUser, getTopRankedUsers } from '@/lib/follows';
 import { getUnreadNotificationCount } from '@/lib/social';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, UserSearchResult } from '@/types';
+import { Movie, TVShow, UserSearchResult } from '@/types';
 
-type SearchMode = 'movies' | 'people';
+type SearchMode = 'titles' | 'people';
+
+// Type for combined search results
+type SearchResultItem = (Movie | TVShow) & { content_type?: 'movie' | 'tv' };
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
@@ -29,10 +32,11 @@ export default function DiscoverScreen() {
   const { user } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<SearchMode>('movies');
-  const [searchResults, setSearchResults] = useState<Movie[]>([]);
+  const [searchMode, setSearchMode] = useState<SearchMode>('titles');
+  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [userResults, setUserResults] = useState<UserSearchResult[]>([]);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  const [trendingShows, setTrendingShows] = useState<TVShow[]>([]);
   const [topUsers, setTopUsers] = useState<(UserSearchResult & { rankings_count: number })[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
@@ -101,9 +105,10 @@ export default function DiscoverScreen() {
     const timeoutId = setTimeout(async () => {
       setIsSearching(true);
       try {
-        if (searchMode === 'movies') {
-          const { movies } = await searchMovies(searchQuery);
-          setSearchResults(movies);
+        if (searchMode === 'titles') {
+          const { results } = await searchAll(searchQuery);
+          // Results already have content_type set from searchAll
+          setSearchResults(results as SearchResultItem[]);
         } else {
           if (!user) return;
           const users = await searchUsers(searchQuery, user.id);
@@ -217,7 +222,7 @@ export default function DiscoverScreen() {
           <IconSymbol name="magnifyingglass" size={18} color={Colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder={searchMode === 'movies' ? 'Search movies...' : 'Search people...'}
+            placeholder={searchMode === 'titles' ? 'Search movies & TV...' : 'Search people...'}
             placeholderTextColor={Colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -237,17 +242,17 @@ export default function DiscoverScreen() {
           <Pressable
             style={[
               styles.modeButton,
-              searchMode === 'movies' && styles.modeButtonActive,
+              searchMode === 'titles' && styles.modeButtonActive,
             ]}
-            onPress={() => setSearchMode('movies')}
+            onPress={() => setSearchMode('titles')}
           >
             <Text
               style={[
                 styles.modeButtonText,
-                searchMode === 'movies' && styles.modeButtonTextActive,
+                searchMode === 'titles' && styles.modeButtonTextActive,
               ]}
             >
-              Movies
+              Titles
             </Text>
           </Pressable>
           <Pressable
@@ -283,14 +288,14 @@ export default function DiscoverScreen() {
               {isSearching && <ActivityIndicator size="small" color={Colors.stamp} />}
             </View>
 
-            {searchMode === 'movies' ? (
-              // Movie search results
+            {searchMode === 'titles' ? (
+              // Title search results (movies & TV)
               searchResults.length > 0 ? (
                 <MovieGrid movies={searchResults} columns={3} />
               ) : !isSearching ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateText}>
-                    No movies found for &quot;{searchQuery}&quot;
+                    No titles found for &quot;{searchQuery}&quot;
                   </Text>
                 </View>
               ) : null
@@ -319,7 +324,7 @@ export default function DiscoverScreen() {
               ) : null
             )}
           </>
-        ) : searchMode === 'movies' ? (
+        ) : searchMode === 'titles' ? (
           <>
             {/* Curated/Trending List */}
             <View style={styles.sectionHeader}>
@@ -336,7 +341,7 @@ export default function DiscoverScreen() {
             ) : (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>
-                  Unable to load movies. Check your API key.
+                  Unable to load titles. Check your API key.
                 </Text>
               </View>
             )}
@@ -395,7 +400,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   title: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },

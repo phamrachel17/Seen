@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -14,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { ProfileListRow } from '@/components/profile-list-row';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
@@ -32,7 +32,7 @@ interface UserStats {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signOut, user } = useAuth();
+  const { user } = useAuth();
 
   const [stats, setStats] = useState<UserStats>({
     totalFilms: 0,
@@ -44,6 +44,7 @@ export default function ProfileScreen() {
   const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
+  const [watchlistCount, setWatchlistCount] = useState(0);
 
   const loadUserData = useCallback(async () => {
     if (!user) return;
@@ -93,6 +94,14 @@ export default function ProfileScreen() {
         rankingsCount: rankingsCount || 0,
       }));
 
+      // Load watchlist count
+      const { count: wlCount } = await supabase
+        .from('bookmarks')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      setWatchlistCount(wlCount || 0);
+
       // Load recent reviews
       const { data: recentData, error: recentError } = await supabase
         .from('reviews')
@@ -135,17 +144,6 @@ export default function ProfileScreen() {
     setIsRefreshing(false);
   };
 
-  const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: signOut },
-      ]
-    );
-  };
-
   const formatWatchTime = (minutes: number) => {
     const days = Math.floor(minutes / (24 * 60));
     const hours = Math.floor((minutes % (24 * 60)) / 60);
@@ -156,7 +154,7 @@ export default function ProfileScreen() {
   };
 
   const navigateToMovie = (movieId: number) => {
-    router.push(`/movie/${movieId}`);
+    router.push(`/title/${movieId}?type=movie` as any);
   };
 
   return (
@@ -167,9 +165,9 @@ export default function ProfileScreen() {
           <IconSymbol name="ellipsis" size={22} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Seen</Text>
-        <Pressable style={styles.iconButton} onPress={handleSignOut}>
+        <Pressable style={styles.iconButton} onPress={() => router.push('/settings')}>
           <View style={styles.settingsIcon}>
-            <IconSymbol name="rectangle.portrait.and.arrow.right" size={18} color={Colors.textMuted} />
+            <IconSymbol name="gearshape" size={18} color={Colors.textMuted} />
           </View>
         </Pressable>
       </View>
@@ -274,6 +272,23 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Lists */}
+        <View style={styles.listsSection}>
+          <Text style={styles.sectionLabel}>LISTS</Text>
+          <ProfileListRow
+            title="Rankings"
+            count={stats.rankingsCount}
+            onPress={() => router.push('/rankings')}
+            icon="list.number"
+          />
+          <ProfileListRow
+            title="Watchlist"
+            count={watchlistCount}
+            onPress={() => router.push('/watchlist')}
+            icon="bookmark"
+          />
+        </View>
+
         {/* Recent Archives */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -335,18 +350,6 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {/* Sign Out Button */}
-        <View style={styles.signOutSection}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.signOutButton,
-              pressed && styles.signOutButtonPressed,
-            ]}
-            onPress={handleSignOut}
-          >
-            <Text style={styles.signOutText}>Sign Out</Text>
-          </Pressable>
-        </View>
       </ScrollView>
     </View>
   );
@@ -365,7 +368,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   headerTitle: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },
@@ -393,6 +396,7 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
   avatarWrapper: {
+    flex: 1,
     alignItems: 'center',
   },
   avatarContainer: {
@@ -486,6 +490,10 @@ const styles = StyleSheet.create({
     width: 1,
     backgroundColor: Colors.border,
   },
+  listsSection: {
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+  },
   section: {
     marginTop: Spacing.xl,
   },
@@ -548,24 +556,5 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
-  },
-  signOutSection: {
-    marginTop: Spacing['2xl'],
-    paddingHorizontal: Spacing.xl,
-  },
-  signOutButton: {
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.sm,
-  },
-  signOutButtonPressed: {
-    opacity: 0.7,
-  },
-  signOutText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
   },
 });

@@ -14,34 +14,13 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, Ranking } from '@/types';
+import { Movie } from '@/types';
 
-interface RankedMovie extends Movie {
-  ranking: Ranking;
-  star_rating: number;
+interface BookmarkedMovie extends Movie {
+  bookmarked_at: string;
 }
 
-// Star display component
-function StarDisplay({ rating, size = 12 }: { rating: number; size?: number }) {
-  return (
-    <View style={styles.starsContainer}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <Text
-          key={star}
-          style={[
-            styles.starIcon,
-            { fontSize: size },
-            star <= rating ? styles.starFilled : styles.starEmpty,
-          ]}
-        >
-          ★
-        </Text>
-      ))}
-    </View>
-  );
-}
-
-export default function RankingsScreen() {
+export default function WatchlistScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
@@ -49,70 +28,38 @@ export default function RankingsScreen() {
 
   // Use provided userId or fall back to current user
   const targetUserId = userId || user?.id;
-  const isOwnRankings = !userId || userId === user?.id;
+  const isOwnWatchlist = !userId || userId === user?.id;
 
-  const [rankings, setRankings] = useState<RankedMovie[]>([]);
+  const [movies, setMovies] = useState<BookmarkedMovie[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const loadRankings = useCallback(async () => {
+  const loadWatchlist = useCallback(async () => {
     if (!targetUserId) return;
 
     try {
-      // Fetch rankings with movies
-      const { data: rankingsData, error: rankingsError } = await supabase
-        .from('rankings')
+      const { data, error } = await supabase
+        .from('bookmarks')
         .select(`
-          *,
+          created_at,
           movies (*)
         `)
         .eq('user_id', targetUserId)
-        .order('rank_position', { ascending: true });
+        .order('created_at', { ascending: false });
 
-      if (rankingsError) {
-        console.error('Error loading rankings:', rankingsError);
+      if (error) {
+        console.error('Error loading watchlist:', error);
         return;
       }
 
-      if (!rankingsData || rankingsData.length === 0) {
-        setRankings([]);
-        return;
-      }
-
-      // Get movie IDs to fetch reviews
-      const movieIds = rankingsData.map((r: any) => r.movie_id);
-
-      // Fetch reviews for star ratings
-      const { data: reviewsData } = await supabase
-        .from('reviews')
-        .select('movie_id, star_rating')
-        .eq('user_id', targetUserId)
-        .in('movie_id', movieIds);
-
-      // Create map of movie_id -> star_rating
-      const reviewsMap = new Map<number, number>();
-      for (const review of reviewsData || []) {
-        reviewsMap.set(review.movie_id, review.star_rating);
-      }
-
-      // Combine data - sorted by rank_position (already from DB)
-      const rankedMovies: RankedMovie[] = rankingsData
+      const bookmarkedMovies: BookmarkedMovie[] = (data || [])
         .filter((item: any) => item.movies)
         .map((item: any) => ({
           ...item.movies,
-          ranking: {
-            id: item.id,
-            user_id: item.user_id,
-            movie_id: item.movie_id,
-            rank_position: item.rank_position,
-            elo_score: item.elo_score,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-          },
-          star_rating: reviewsMap.get(item.movie_id) || 0,
+          bookmarked_at: item.created_at,
         }));
 
-      setRankings(rankedMovies);
+      setMovies(bookmarkedMovies);
     } finally {
       setIsLoading(false);
     }
@@ -121,14 +68,14 @@ export default function RankingsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (targetUserId) {
-        loadRankings();
+        loadWatchlist();
       }
-    }, [targetUserId, loadRankings])
+    }, [targetUserId, loadWatchlist])
   );
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadRankings();
+    await loadWatchlist();
     setIsRefreshing(false);
   };
 
@@ -143,7 +90,7 @@ export default function RankingsScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{isOwnRankings ? 'My Rankings' : 'Their Rankings'}</Text>
+        <Text style={styles.headerTitle}>{isOwnWatchlist ? 'Watchlist' : 'Their Watchlist'}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -159,14 +106,14 @@ export default function RankingsScreen() {
           />
         }
       >
-        {!isLoading && rankings.length === 0 ? (
+        {!isLoading && movies.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
-              {isOwnRankings
-                ? 'No ranked films yet. Start reviewing movies to build your list.'
-                : 'No ranked films yet.'}
+              {isOwnWatchlist
+                ? 'Your watchlist is empty. Browse films and bookmark ones you want to watch.'
+                : 'No films in watchlist yet.'}
             </Text>
-            {isOwnRankings && (
+            {isOwnWatchlist && (
               <Pressable
                 style={styles.discoverButton}
                 onPress={() => router.push('/(tabs)/discover')}
@@ -176,26 +123,16 @@ export default function RankingsScreen() {
             )}
           </View>
         ) : (
-          <View style={styles.rankingsList}>
-            {rankings.map((movie, index) => (
+          <View style={styles.movieList}>
+            {movies.map((movie) => (
               <Pressable
                 key={movie.id}
                 style={({ pressed }) => [
-                  styles.rankItem,
+                  styles.movieItem,
                   pressed && styles.itemPressed,
                 ]}
                 onPress={() => navigateToMovie(movie.id)}
               >
-                {/* Rank Number */}
-                <View style={styles.rankNumberContainer}>
-                  <Text style={[
-                    styles.rankNumber,
-                    index < 3 && styles.topRankNumber,
-                  ]}>
-                    {index + 1}
-                  </Text>
-                </View>
-
                 {/* Poster */}
                 {movie.poster_url ? (
                   <Image
@@ -218,11 +155,6 @@ export default function RankingsScreen() {
                     {movie.release_year}
                     {movie.director ? ` • ${movie.director}` : ''}
                   </Text>
-                </View>
-
-                {/* Star Rating */}
-                <View style={styles.movieStars}>
-                  <StarDisplay rating={movie.star_rating} size={10} />
                 </View>
 
                 {/* Chevron */}
@@ -299,10 +231,10 @@ const styles = StyleSheet.create({
     color: Colors.stamp,
     letterSpacing: 0.5,
   },
-  rankingsList: {
+  movieList: {
     paddingTop: Spacing.sm,
   },
-  rankItem: {
+  movieItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Spacing.md,
@@ -312,20 +244,6 @@ const styles = StyleSheet.create({
   },
   itemPressed: {
     backgroundColor: Colors.dust,
-  },
-  rankNumberContainer: {
-    width: 32,
-    alignItems: 'center',
-    marginRight: Spacing.md,
-  },
-  rankNumber: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes.lg,
-    color: Colors.textMuted,
-  },
-  topRankNumber: {
-    color: Colors.stamp,
-    fontSize: FontSizes.xl,
   },
   poster: {
     width: 50,
@@ -357,21 +275,5 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
-  },
-  movieStars: {
-    marginRight: Spacing.sm,
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    gap: 1,
-  },
-  starIcon: {
-    fontFamily: Fonts.sans,
-  },
-  starFilled: {
-    color: Colors.stamp,
-  },
-  starEmpty: {
-    color: Colors.dust,
   },
 });

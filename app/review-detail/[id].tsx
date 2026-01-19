@@ -271,7 +271,7 @@ export default function ReviewDetailScreen() {
         {/* Movie Info */}
         <Pressable
           style={styles.movieSection}
-          onPress={() => router.push(`/movie/${review.movie_id}`)}
+          onPress={() => router.push(`/title/${review.movie_id}?type=movie` as any)}
         >
           {review.movies.poster_url && (
             <Image

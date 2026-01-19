@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -29,40 +29,79 @@ export default function FollowListModal() {
   const { user } = useAuth();
   const params = useLocalSearchParams<{ type: string; userId: string }>();
 
-  const listType = (params.type as ListType) || 'followers';
+  const initialTab = (params.type as ListType) || 'followers';
   const targetUserId = params.userId || user?.id || '';
 
-  const [users, setUsers] = useState<UserSearchResult[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ListType>(initialTab);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
-  const [loadingFollowIds, setLoadingFollowIds] = useState<Set<string>>(
-    new Set()
-  );
+  const [loadingFollowIds, setLoadingFollowIds] = useState<Set<string>>(new Set());
 
-  const loadUsers = useCallback(async () => {
+  // Separate state for each tab
+  const [followersData, setFollowersData] = useState<UserSearchResult[]>([]);
+  const [followingData, setFollowingData] = useState<UserSearchResult[]>([]);
+  const [followersLoading, setFollowersLoading] = useState(false);
+  const [followingLoading, setFollowingLoading] = useState(false);
+
+  // Track which tabs have been loaded
+  const loadedTabs = useRef<Set<ListType>>(new Set());
+
+  const loadTabData = useCallback(async (tab: ListType) => {
     if (!user || !targetUserId) return;
+    if (loadedTabs.current.has(tab)) return;
 
-    setIsLoading(true);
+    // Mark as loading
+    loadedTabs.current.add(tab);
+
+    if (tab === 'followers') {
+      setFollowersLoading(true);
+    } else {
+      setFollowingLoading(true);
+    }
+
     try {
       const data =
-        listType === 'followers'
+        tab === 'followers'
           ? await getFollowers(targetUserId, user.id)
           : await getFollowing(targetUserId, user.id);
 
-      setUsers(data);
-      setFollowingIds(
-        new Set(data.filter((u) => u.is_following).map((u) => u.id))
-      );
-    } catch (error) {
-      console.error('Error loading users:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user, targetUserId, listType]);
+      if (tab === 'followers') {
+        setFollowersData(data);
+        setFollowersLoading(false);
+      } else {
+        setFollowingData(data);
+        setFollowingLoading(false);
+      }
 
+      // Update following IDs from the loaded data
+      const newFollowingIds = data.filter((u) => u.is_following).map((u) => u.id);
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        newFollowingIds.forEach((id) => next.add(id));
+        return next;
+      });
+    } catch (error) {
+      console.error(`Error loading ${tab}:`, error);
+      if (tab === 'followers') {
+        setFollowersLoading(false);
+      } else {
+        setFollowingLoading(false);
+      }
+      // Allow retry on error
+      loadedTabs.current.delete(tab);
+    }
+  }, [user, targetUserId]);
+
+  // Load initial tab data
   useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+    if (user && targetUserId) {
+      loadTabData(initialTab);
+    }
+  }, [user, targetUserId, initialTab, loadTabData]);
+
+  const handleTabChange = (tab: ListType) => {
+    setActiveTab(tab);
+    loadTabData(tab);
+  };
 
   const handleFollowPress = async (targetId: string) => {
     if (!user || loadingFollowIds.has(targetId)) return;
@@ -120,14 +159,32 @@ export default function FollowListModal() {
   };
 
   const handleUserPress = (userId: string) => {
-    router.push(`/user/${userId}`);
+    // Close modal first, then navigate to user profile
+    router.back();
+    // Use setTimeout to ensure modal closes before navigation
+    setTimeout(() => {
+      router.push(`/user/${userId}`);
+    }, 100);
   };
 
   const handleClose = () => {
     router.back();
   };
 
-  const title = listType === 'followers' ? 'Followers' : 'Following';
+  // Get current tab's data
+  const currentUsers = activeTab === 'followers' ? followersData : followingData;
+  const isLoading = activeTab === 'followers' ? followersLoading : followingLoading;
+
+  const renderUserItem = ({ item }: { item: UserSearchResult }) => (
+    <UserListItem
+      user={item}
+      currentUserId={user?.id || ''}
+      isFollowing={followingIds.has(item.id)}
+      isLoading={loadingFollowIds.has(item.id)}
+      onFollowPress={() => handleFollowPress(item.id)}
+      onUserPress={() => handleUserPress(item.id)}
+    />
+  );
 
   return (
     <View style={styles.container}>
@@ -136,36 +193,46 @@ export default function FollowListModal() {
         <Pressable style={styles.closeButton} onPress={handleClose}>
           <IconSymbol name="xmark" size={20} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{title}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* User List */}
+      {/* Tabs */}
+      <View style={styles.tabContainer}>
+        <Pressable
+          style={[styles.tab, activeTab === 'followers' && styles.activeTab]}
+          onPress={() => handleTabChange('followers')}
+        >
+          <Text style={[styles.tabText, activeTab === 'followers' && styles.activeTabText]}>
+            Followers
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tab, activeTab === 'following' && styles.activeTab]}
+          onPress={() => handleTabChange('following')}
+        >
+          <Text style={[styles.tabText, activeTab === 'following' && styles.activeTabText]}>
+            Following
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.stamp} />
         </View>
-      ) : users.length > 0 ? (
+      ) : currentUsers.length > 0 ? (
         <FlatList
-          data={users}
+          data={currentUsers}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <UserListItem
-              user={item}
-              currentUserId={user?.id || ''}
-              isFollowing={followingIds.has(item.id)}
-              isLoading={loadingFollowIds.has(item.id)}
-              onFollowPress={() => handleFollowPress(item.id)}
-              onUserPress={() => handleUserPress(item.id)}
-            />
-          )}
+          renderItem={renderUserItem}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
       ) : (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
-            {listType === 'followers'
+            {activeTab === 'followers'
               ? 'No followers yet'
               : 'Not following anyone yet'}
           </Text>
@@ -186,8 +253,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
   },
   closeButton: {
     width: 36,
@@ -197,13 +262,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes.xl,
-    color: Colors.text,
-  },
   headerSpacer: {
     width: 36,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomColor: Colors.stamp,
+  },
+  tabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
+  },
+  activeTabText: {
+    fontFamily: Fonts.sansSemiBold,
+    color: Colors.text,
   },
   loadingContainer: {
     flex: 1,

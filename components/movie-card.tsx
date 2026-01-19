@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, Pressable, Dimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
-import { Movie } from '@/types';
+import { Movie, TVShow, ContentType } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -10,11 +10,15 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_WIDTH = SCREEN_WIDTH - Spacing.xl * 2;
 const GAP = Spacing.sm; // Gap between cards
 
+// Combined type that works for both movies and TV shows
+type ContentItem = (Movie | TVShow) & { content_type?: ContentType };
+
 interface MovieCardProps {
-  movie: Movie;
+  movie: ContentItem;
   size?: 'small' | 'medium' | 'large';
   showInfo?: boolean;
   onPress?: () => void;
+  contentType?: ContentType;
 }
 
 const CARD_SIZES = {
@@ -34,15 +38,18 @@ const CARD_SIZES = {
   },
 };
 
-export function MovieCard({ movie, size = 'small', showInfo = true, onPress }: MovieCardProps) {
+export function MovieCard({ movie, size = 'small', showInfo = true, onPress, contentType }: MovieCardProps) {
   const router = useRouter();
   const cardSize = CARD_SIZES[size];
+
+  // Determine content type from prop, movie.content_type, or default to 'movie'
+  const type = contentType || movie.content_type || 'movie';
 
   const handlePress = () => {
     if (onPress) {
       onPress();
     } else {
-      router.push(`/movie/${movie.id}`);
+      router.push(`/title/${movie.id}?type=${type}` as any);
     }
   };
 
@@ -77,7 +84,7 @@ export function MovieCard({ movie, size = 'small', showInfo = true, onPress }: M
           </Text>
           <Text style={styles.meta}>
             {movie.release_year}
-            {movie.director && ` • ${movie.director}`}
+            {'director' in movie && movie.director && ` • ${movie.director}`}
           </Text>
         </View>
       )}
@@ -85,9 +92,9 @@ export function MovieCard({ movie, size = 'small', showInfo = true, onPress }: M
   );
 }
 
-// Grid variant for displaying multiple movies
+// Grid variant for displaying multiple movies/TV shows
 interface MovieGridProps {
-  movies: Movie[];
+  movies: ContentItem[];
   columns?: 2 | 3;
   showInfo?: boolean;
 }

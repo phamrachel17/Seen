@@ -98,7 +98,7 @@ export default function ListsScreen() {
   };
 
   const navigateToMovie = (movieId: number) => {
-    router.push(`/movie/${movieId}`);
+    router.push(`/title/${movieId}?type=movie` as any);
   };
 
   const navigateToRankings = () => {
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.lg,
   },
   seenTitle: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },

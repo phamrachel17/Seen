@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
-import { Comment, Notification, User, Review } from '@/types';
+import { Comment, Notification, User, Review, WatchHistoryEntry } from '@/types';
+import { getWatchDates } from './watch-history';
 
 // ============ MOVIE RATINGS ============
 
@@ -340,6 +341,7 @@ export async function getSuggestedFriends(
 
 export interface FriendReview extends Review {
   users: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+  watchDates?: WatchHistoryEntry[];
 }
 
 export async function getFriendsReviewsForMovie(
@@ -379,5 +381,13 @@ export async function getFriendsReviewsForMovie(
     return [];
   }
 
-  return reviewsData as FriendReview[];
+  // Fetch watch dates for each friend's review
+  const reviewsWithDates = await Promise.all(
+    reviewsData.map(async (review) => {
+      const dates = await getWatchDates(review.user_id, movieId);
+      return { ...review, watchDates: dates } as FriendReview;
+    })
+  );
+
+  return reviewsWithDates;
 }

@@ -12,23 +12,19 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { FeedCard } from '@/components/feed-card';
-import { supabase } from '@/lib/supabase';
+import { ActivityFeedCard } from '@/components/activity-feed-card';
 import { useAuth } from '@/lib/auth-context';
 import { getUnreadNotificationCount } from '@/lib/social';
-import { Movie, Review, User } from '@/types';
-
-interface FeedReview extends Review {
-  movies: Movie;
-  users: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
-}
+import { getFeedActivities } from '@/lib/activity';
+import { getFollowingIds } from '@/lib/follows';
+import { Activity } from '@/types';
 
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
 
-  const [reviews, setReviews] = useState<FeedReview[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -41,48 +37,14 @@ export default function FeedScreen() {
 
     try {
       // Get users the current user is following
-      const { data: followingData } = await supabase
-        .from('follows')
-        .select('following_id')
-        .eq('follower_id', user.id);
+      const followingIds = await getFollowingIds(user.id);
 
-      const followingIds = followingData?.map((f) => f.following_id) || [];
+      // Include current user's activities in feed
       const feedUserIds = [user.id, ...followingIds];
 
-      // Fetch reviews from the user and people they follow
-      // Don't order by created_at - we'll sort by most recent activity (created or updated)
-      const { data, error } = await supabase
-        .from('reviews')
-        .select(`
-          *,
-          movies (*),
-          users!reviews_user_id_fkey (id, username, display_name, profile_image_url)
-        `)
-        .in('user_id', feedUserIds)
-        .or(`is_private.eq.false,user_id.eq.${user.id}`)
-        .limit(100);
-
-      if (error) {
-        console.error('Error loading feed:', error);
-        return;
-      }
-
-      // Filter and sort by most recent activity (created_at or updated_at)
-      const feedReviews = (data || [])
-        .filter((item: FeedReview) => item.movies && item.users)
-        .sort((a, b) => {
-          // Get the most recent date for each review
-          const aDate = new Date(a.updated_at) > new Date(a.created_at)
-            ? new Date(a.updated_at)
-            : new Date(a.created_at);
-          const bDate = new Date(b.updated_at) > new Date(b.created_at)
-            ? new Date(b.updated_at)
-            : new Date(b.created_at);
-          return bDate.getTime() - aDate.getTime();
-        })
-        .slice(0, 50) as FeedReview[];
-
-      setReviews(feedReviews);
+      // Fetch activities from the user and people they follow
+      const feedActivities = await getFeedActivities(user.id, feedUserIds, 50);
+      setActivities(feedActivities);
 
       // Load unread notification count
       const count = await getUnreadNotificationCount(user.id);
@@ -110,12 +72,12 @@ export default function FeedScreen() {
     router.push('/notifications');
   };
 
-  const renderItem = ({ item }: { item: FeedReview }) => (
-    <FeedCard review={item} onLikeChange={loadFeed} />
+  const renderItem = ({ item }: { item: Activity }) => (
+    <ActivityFeedCard activity={item} />
   );
 
   const renderHeader = () => (
-    <Text style={styles.sectionTitle}>The Ledger</Text>
+    <Text style={styles.sectionTitle}>Your Feed</Text>
   );
 
   const renderEmpty = () => {
@@ -161,7 +123,7 @@ export default function FeedScreen() {
         </View>
       ) : (
         <FlatList
-          data={reviews}
+          data={activities}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           ListHeaderComponent={renderHeader}
@@ -195,7 +157,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   title: {
-    fontFamily: Fonts.serifBoldItalic,
+    fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },

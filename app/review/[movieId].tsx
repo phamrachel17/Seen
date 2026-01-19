@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
@@ -24,7 +25,8 @@ import { useAuth } from '@/lib/auth-context';
 import { createNotification } from '@/lib/social';
 import { getPendingFriendSelection } from '@/lib/friend-picker-state';
 import { removeRanking } from '@/lib/ranking';
-import { Movie, Review } from '@/types';
+import { getWatchDates, addWatchDate, removeWatchDate } from '@/lib/watch-history';
+import { Movie, Review, WatchHistoryEntry } from '@/types';
 
 export default function ReviewModal() {
   const params = useLocalSearchParams<{
@@ -45,6 +47,15 @@ export default function ReviewModal() {
   const [reviewText, setReviewText] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [taggedFriends, setTaggedFriends] = useState<string[]>([]);
+
+  // Watch date state
+  const [watchDates, setWatchDates] = useState<WatchHistoryEntry[]>([]);
+  const [pendingWatchDates, setPendingWatchDates] = useState<Date[]>([]);
+  const [newWatchDate, setNewWatchDate] = useState<Date>(new Date());
+  const [showAddDate, setShowAddDate] = useState(false);
+
+  // Track original values for update type detection
+  const [originalReviewText, setOriginalReviewText] = useState<string | null>(null);
 
   useEffect(() => {
     if (params.movieId) {
@@ -85,9 +96,14 @@ export default function ReviewModal() {
           setStarRating(review.star_rating);
           setOriginalStarRating(review.star_rating);
           setReviewText(review.review_text || '');
+          setOriginalReviewText(review.review_text || null);
           setIsPrivate(review.is_private);
           setTaggedFriends(review.tagged_friends || []);
         }
+
+        // Load watch dates
+        const dates = await getWatchDates(user.id, id);
+        setWatchDates(dates);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -132,11 +148,24 @@ export default function ReviewModal() {
       };
 
       if (existingReview) {
+        // Determine what changed for update type
+        let lastUpdateType: string | null = null;
+        if (originalStarRating !== null && starRating !== originalStarRating) {
+          lastUpdateType = 'rating_changed';
+        } else if (reviewText.trim() && !originalReviewText) {
+          lastUpdateType = 'review_added';
+        } else if (reviewText.trim() !== (originalReviewText || '')) {
+          lastUpdateType = 'review_updated';
+        } else if (pendingWatchDates.length > 0) {
+          lastUpdateType = 'watch_date_added';
+        }
+
         // Update existing review
         const { error } = await supabase
           .from('reviews')
           .update({
             ...reviewData,
+            last_update_type: lastUpdateType,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existingReview.id);
@@ -144,6 +173,11 @@ export default function ReviewModal() {
         if (error) {
           console.error('Error updating review:', error);
           return;
+        }
+
+        // Save pending watch dates
+        for (const date of pendingWatchDates) {
+          await addWatchDate(user.id, movie.id, date);
         }
 
         // Check if star rating changed - need to re-rank
@@ -178,6 +212,9 @@ export default function ReviewModal() {
           });
         }
 
+        // Auto-add today's date as watch date for new reviews
+        await addWatchDate(user.id, movie.id, new Date());
+
         // Navigate to ranking flow with star rating for tier-based ranking
         router.replace(`/rank/${movie.id}?starRating=${starRating}`);
       }
@@ -200,6 +237,25 @@ export default function ReviewModal() {
       console.error('Error deleting review:', error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleAddWatchDate = () => {
+    // Add to local pending list (not database yet)
+    setPendingWatchDates(prev => [...prev, newWatchDate]);
+    setShowAddDate(false);
+    setNewWatchDate(new Date());
+  };
+
+  const handleRemovePendingDate = (index: number) => {
+    setPendingWatchDates(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRemoveWatchDate = async (watchHistoryId: string) => {
+    const { error } = await removeWatchDate(watchHistoryId);
+
+    if (!error) {
+      setWatchDates(prev => prev.filter(d => d.id !== watchHistoryId));
     }
   };
 
@@ -293,6 +349,95 @@ export default function ReviewModal() {
             trackColor={{ false: Colors.dust, true: Colors.stamp }}
             thumbColor={Colors.white}
           />
+        </View>
+
+        {/* Watch Dates Section */}
+        <View style={styles.watchDatesSection}>
+          <Text style={styles.sectionLabel}>WATCH DATES</Text>
+
+          {/* Existing and pending watch dates as pills */}
+          {(watchDates.length > 0 || pendingWatchDates.length > 0) && (
+            <View style={styles.watchDatePillsContainer}>
+              {/* Existing dates from database */}
+              {watchDates.map((entry) => (
+                <View key={entry.id} style={styles.watchDatePill}>
+                  <Text style={styles.watchDatePillText}>
+                    {new Date(entry.watched_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                  <Pressable
+                    onPress={() => handleRemoveWatchDate(entry.id)}
+                    hitSlop={8}
+                  >
+                    <IconSymbol name="xmark" size={12} color={Colors.textMuted} />
+                  </Pressable>
+                </View>
+              ))}
+              {/* Pending dates (not yet saved) */}
+              {pendingWatchDates.map((date, index) => (
+                <View key={`pending-${index}`} style={styles.pendingWatchDatePill}>
+                  <Text style={styles.pendingWatchDatePillText}>
+                    {date.toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                  <Pressable
+                    onPress={() => handleRemovePendingDate(index)}
+                    hitSlop={8}
+                  >
+                    <IconSymbol name="xmark" size={12} color={Colors.stamp} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Pending date selection with compact picker */}
+          {showAddDate && (
+            <View style={styles.addDateRow}>
+              <DateTimePicker
+                value={newWatchDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'compact' : 'default'}
+                maximumDate={new Date()}
+                onChange={(event, date) => {
+                  if (date) {
+                    setNewWatchDate(date);
+                  }
+                }}
+                themeVariant="light"
+              />
+              <Pressable
+                style={styles.addDateButton}
+                onPress={handleAddWatchDate}
+              >
+                <Text style={styles.addDateButtonText}>Add</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Add date button */}
+          {!showAddDate && (
+            <Pressable
+              style={styles.addAnotherButton}
+              onPress={() => {
+                setNewWatchDate(new Date());
+                setShowAddDate(true);
+              }}
+            >
+              <IconSymbol name="plus" size={16} color={Colors.stamp} />
+              <Text style={styles.addAnotherText}>
+                {watchDates.length === 0 && pendingWatchDates.length === 0
+                  ? 'Add watch date'
+                  : 'Add another date'}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         {/* Watched With - Section Header with Chevron */}
@@ -544,5 +689,74 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  watchDatesSection: {
+    marginBottom: Spacing['2xl'],
+  },
+  watchDatePillsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  watchDatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: Colors.dust,
+    paddingVertical: Spacing.sm,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.sm,
+    borderRadius: BorderRadius.full,
+  },
+  watchDatePillText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+  },
+  pendingWatchDatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: Colors.background,
+    paddingVertical: Spacing.sm,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: Colors.stamp,
+    borderStyle: 'dashed',
+  },
+  pendingWatchDatePillText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
+  },
+  addAnotherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  addAnotherText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
+  },
+  addDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  addDateButton: {
+    backgroundColor: Colors.stamp,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.sm,
+  },
+  addDateButtonText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.paper,
   },
 });

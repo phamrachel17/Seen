@@ -199,6 +199,18 @@ export async function checkIfFollowing(
   return !!data;
 }
 
+// Get list of user IDs that the current user is following
+export async function getFollowingIds(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', userId);
+
+  if (error || !data) return [];
+
+  return data.map((f) => f.following_id);
+}
+
 // Get user profile data
 export async function getUserProfile(
   userId: string
