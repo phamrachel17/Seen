@@ -141,7 +141,7 @@ export default function TitleDetailScreen() {
         getUserCompletedActivity(user.id, contentId),
         getUserInProgressActivity(user.id, contentId),
         getActiveWatch(user.id, contentId),
-        checkBookmarkStatus(tmdbId),
+        checkBookmarkStatus(contentId),
         loadUserRanking(tmdbId),
         getFriendsActivitiesForContent(user.id, contentId, followingIds),
       ]);
@@ -158,12 +158,12 @@ export default function TitleDetailScreen() {
     }
   };
 
-  const checkBookmarkStatus = async (tmdbId: number): Promise<boolean> => {
+  const checkBookmarkStatus = async (contentId: number): Promise<boolean> => {
     const { data } = await supabase
       .from('bookmarks')
       .select('id')
       .eq('user_id', user?.id)
-      .eq('movie_id', tmdbId)
+      .eq('content_id', contentId)
       .single();
 
     return !!data;
@@ -218,12 +218,11 @@ export default function TitleDetailScreen() {
           .from('bookmarks')
           .delete()
           .eq('user_id', user.id)
-          .eq('movie_id', content.tmdb_id);
+          .eq('content_id', content.id);
         setIsBookmarked(false);
       } else {
         await supabase.from('bookmarks').insert({
           user_id: user.id,
-          movie_id: content.tmdb_id,
           content_id: content.id,
         });
         setIsBookmarked(true);
@@ -397,6 +396,7 @@ export default function TitleDetailScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
             progressViewOffset={HEADER_MIN_HEIGHT}
           />
         }
@@ -529,6 +529,11 @@ export default function TitleDetailScreen() {
               >
                 <View style={styles.activityHeader}>
                   <View style={styles.starsRow}>
+                    {completedActivity.watch && (
+                      <View style={styles.watchNumberBadge}>
+                        <Text style={styles.watchNumberText}>Watch #{completedActivity.watch.watch_number}</Text>
+                      </View>
+                    )}
                     {[1, 2, 3, 4, 5].map((star) => (
                       <IconSymbol
                         key={star}
@@ -570,9 +575,9 @@ export default function TitleDetailScreen() {
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionLabelRow}>
                   <Text style={styles.sectionLabel}>Your Progress:</Text>
-                  {activeWatch && (
+                  {inProgressActivity.watch && (
                     <View style={styles.watchNumberBadge}>
-                      <Text style={styles.watchNumberText}>Watch #{activeWatch.watch_number}</Text>
+                      <Text style={styles.watchNumberText}>Watch #{inProgressActivity.watch.watch_number}</Text>
                     </View>
                   )}
                 </View>
@@ -640,6 +645,11 @@ export default function TitleDetailScreen() {
                   </Pressable>
                   {activity.status === 'completed' ? (
                     <View style={styles.starsRow}>
+                      {activity.watch && (
+                        <View style={styles.watchNumberBadge}>
+                          <Text style={styles.watchNumberText}>Watch #{activity.watch.watch_number}</Text>
+                        </View>
+                      )}
                       {[1, 2, 3, 4, 5].map((star) => (
                         <IconSymbol
                           key={star}
@@ -652,6 +662,11 @@ export default function TitleDetailScreen() {
                   ) : (
                     <View style={styles.inProgressBadge}>
                       <IconSymbol name="play.circle.fill" size={12} color={Colors.textMuted} />
+                      {activity.watch && (
+                        <View style={styles.watchNumberBadge}>
+                          <Text style={styles.watchNumberText}>Watch #{activity.watch.watch_number}</Text>
+                        </View>
+                      )}
                       <Text style={styles.inProgressBadgeText}>
                         {formatProgress(activity) || 'In Progress'}
                       </Text>

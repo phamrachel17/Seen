@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth-context';
-import { getUserActivities, formatProgress } from '@/lib/activity';
+import { getUserActivities, formatProgress, isActivityInProgress } from '@/lib/activity';
 import { Activity } from '@/types';
 
 export default function CurrentlyWatchingScreen() {
@@ -30,7 +30,7 @@ export default function CurrentlyWatchingScreen() {
     try {
       const data = await getUserActivities(user.id, 'in_progress');
 
-      // Deduplicate by content_id, keeping the most recent activity per content
+      // Deduplicate by content_id FIRST, keeping the most recent activity per content
       // (data is already sorted by created_at DESC)
       const latestByContent = new Map<number, Activity>();
       for (const activity of data) {
@@ -40,7 +40,10 @@ export default function CurrentlyWatchingScreen() {
         }
       }
 
-      setActivities(Array.from(latestByContent.values()));
+      // Filter to only include activities that are truly in progress (< 100%)
+      const activeInProgress = Array.from(latestByContent.values()).filter(isActivityInProgress);
+
+      setActivities(activeInProgress);
     } finally {
       setIsLoading(false);
     }
@@ -82,6 +85,7 @@ export default function CurrentlyWatchingScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >
@@ -128,7 +132,7 @@ export default function CurrentlyWatchingScreen() {
                   <View style={styles.metaRow}>
                     {activity.watch && (
                       <View style={styles.watchBadge}>
-                        <Text style={styles.watchBadgeText}>#{activity.watch.watch_number}</Text>
+                        <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
                       </View>
                     )}
                     <Text style={styles.meta}>

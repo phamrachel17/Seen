@@ -79,20 +79,39 @@ export default function RankingsScreen() {
         return;
       }
 
-      // Get movie IDs to fetch reviews
-      const movieIds = rankingsData.map((r: any) => r.movie_id);
+      // Get TMDB IDs from rankings
+      const tmdbIds = rankingsData.map((r: any) => r.movie_id);
 
-      // Fetch reviews for star ratings
-      const { data: reviewsData } = await supabase
-        .from('reviews')
-        .select('movie_id, star_rating')
+      // Map TMDB IDs to internal content IDs
+      const { data: contentMapping } = await supabase
+        .from('content')
+        .select('id, tmdb_id')
+        .in('tmdb_id', tmdbIds);
+
+      // Build TMDB ID → content ID map
+      const tmdbToContentMap = new Map<number, number>();
+      for (const content of contentMapping || []) {
+        tmdbToContentMap.set(content.tmdb_id, content.id);
+      }
+
+      // Get internal content IDs for activity query
+      const contentIds = rankingsData
+        .map((r: any) => tmdbToContentMap.get(r.movie_id))
+        .filter((id): id is number => id !== undefined);
+
+      // Fetch completed activities with star ratings using content IDs
+      const { data: activitiesData } = await supabase
+        .from('activity_log')
+        .select('content_id, star_rating')
         .eq('user_id', targetUserId)
-        .in('movie_id', movieIds);
+        .eq('status', 'completed')
+        .in('content_id', contentIds)
+        .not('star_rating', 'is', null);
 
-      // Create map of movie_id -> star_rating
-      const reviewsMap = new Map<number, number>();
-      for (const review of reviewsData || []) {
-        reviewsMap.set(review.movie_id, review.star_rating);
+      // Create map of content_id -> star_rating
+      const ratingsMap = new Map<number, number>();
+      for (const activity of activitiesData || []) {
+        ratingsMap.set(activity.content_id, activity.star_rating);
       }
 
       // Combine data - sorted by rank_position (already from DB)
@@ -109,7 +128,7 @@ export default function RankingsScreen() {
             created_at: item.created_at,
             updated_at: item.updated_at,
           },
-          star_rating: reviewsMap.get(item.movie_id) || 0,
+          star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id)) || 0,
         }));
 
       setRankings(rankedMovies);
@@ -156,6 +175,7 @@ export default function RankingsScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >

@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { Movie, Ranking, Review } from '@/types';
+import { ensureContentExists } from './content';
+import { createActivity } from './activity';
 
 // Movie with ranking and review data
 export interface RankedMovie extends Movie {
@@ -127,24 +129,43 @@ export async function getUserRankingsWithRatings(userId: string): Promise<Ranked
     return [];
   }
 
-  // Get movie IDs to fetch reviews
-  const movieIds = rankingsData.map((r: any) => r.movie_id);
+  // Get TMDB IDs from rankings
+  const tmdbIds = rankingsData.map((r: any) => r.movie_id);
 
-  // Fetch reviews for these movies
-  const { data: reviewsData, error: reviewsError } = await supabase
-    .from('reviews')
-    .select('movie_id, star_rating')
-    .eq('user_id', userId)
-    .in('movie_id', movieIds);
+  // Map TMDB IDs to internal content IDs
+  const { data: contentMapping } = await supabase
+    .from('content')
+    .select('id, tmdb_id')
+    .in('tmdb_id', tmdbIds);
 
-  if (reviewsError) {
-    console.error('Error fetching reviews:', reviewsError);
+  // Build TMDB ID → content ID map
+  const tmdbToContentMap = new Map<number, number>();
+  for (const content of contentMapping || []) {
+    tmdbToContentMap.set(content.tmdb_id, content.id);
   }
 
-  // Create a map of movie_id -> star_rating
-  const reviewsMap = new Map<number, number>();
-  for (const review of reviewsData || []) {
-    reviewsMap.set(review.movie_id, review.star_rating);
+  // Get internal content IDs for activity query
+  const contentIds = rankingsData
+    .map((r: any) => tmdbToContentMap.get(r.movie_id))
+    .filter((id): id is number => id !== undefined);
+
+  // Fetch completed activities with star ratings using content IDs
+  const { data: activitiesData, error: activitiesError } = await supabase
+    .from('activity_log')
+    .select('content_id, star_rating')
+    .eq('user_id', userId)
+    .eq('status', 'completed')
+    .in('content_id', contentIds)
+    .not('star_rating', 'is', null);
+
+  if (activitiesError) {
+    console.error('Error fetching activities:', activitiesError);
+  }
+
+  // Create a map of content_id -> star_rating
+  const ratingsMap = new Map<number, number>();
+  for (const activity of activitiesData || []) {
+    ratingsMap.set(activity.content_id, activity.star_rating);
   }
 
   // Combine the data
@@ -161,7 +182,7 @@ export async function getUserRankingsWithRatings(userId: string): Promise<Ranked
         created_at: item.created_at,
         updated_at: item.updated_at,
       },
-      star_rating: reviewsMap.get(item.movie_id) || 0,
+      star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id)) || 0,
     }));
 }
 
@@ -353,6 +374,30 @@ export async function saveRanking(
     }
 
     console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition}`);
+
+    // Ensure content exists and create completed activity
+    try {
+      // Ensure movie exists in content table and get content ID
+      const content = await ensureContentExists(movie.id, 'movie');
+
+      if (content) {
+        // Create completed activity with the star rating
+        await createActivity({
+          userId: userId,
+          tmdbId: movie.id,
+          contentType: 'movie',
+          status: 'completed',
+          starRating: starRating,
+          watchDate: new Date(),
+          isPrivate: false,
+        });
+
+        console.log('Created completed activity for ranking');
+      }
+    } catch (activityError) {
+      console.error('Error creating activity for ranking:', activityError);
+      // Don't throw - ranking was saved successfully
+    }
   } catch (error) {
     console.error('Error in saveRanking:', error);
     throw error;

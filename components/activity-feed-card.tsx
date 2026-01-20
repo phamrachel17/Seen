@@ -128,11 +128,11 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
   };
 
   const getActivityLabel = (): string => {
+    if (isCompleted) {
+      return 'Ranked';
+    }
     if (isInProgress) {
-      if (content.content_type === 'tv') {
-        return 'Started watching';
-      }
-      return 'Started watching';
+      return 'Logged Progress';
     }
     return '';
   };
@@ -201,13 +201,25 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
 
           {/* Completed: Show stars */}
           {isCompleted && activity.star_rating && (
-            <View style={styles.ratingRow}>{renderStars(activity.star_rating)}</View>
+            <View style={styles.ratingRow}>
+              {activity.watch && (
+                <View style={styles.watchBadge}>
+                  <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
+                </View>
+              )}
+              {renderStars(activity.star_rating)}
+            </View>
           )}
 
           {/* In Progress: Show progress */}
           {isInProgress && (
             <View style={styles.progressRow}>
               <IconSymbol name="play.circle.fill" size={14} color={Colors.textMuted} />
+              {activity.watch && (
+                <View style={styles.watchBadge}>
+                  <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
+                </View>
+              )}
               <Text style={styles.progressText}>
                 {formatProgress(activity) || 'In Progress'}
               </Text>
@@ -439,5 +451,17 @@ const styles = StyleSheet.create({
   },
   privateIndicator: {
     padding: Spacing.xs,
+  },
+  watchBadge: {
+    backgroundColor: Colors.dust,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 1,
+    borderRadius: BorderRadius.sm,
+    marginRight: Spacing.xs,
+  },
+  watchBadgeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.xs,
+    color: Colors.text,
   },
 });

@@ -219,6 +219,7 @@ export default function UserProfileScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >

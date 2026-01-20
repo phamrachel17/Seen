@@ -261,6 +261,7 @@ export default function NotificationsScreen() {
               refreshing={isRefreshing}
               onRefresh={onRefresh}
               tintColor={Colors.stamp}
+              colors={[Colors.stamp]}
             />
           }
         />

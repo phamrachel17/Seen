@@ -260,30 +260,72 @@ export async function getUserStats(userId: string): Promise<{
   totalMinutes: number;
   rankingsCount: number;
 }> {
-  const [reviewsResult, rankingsResult] = await Promise.all([
+  const [activitiesResult, rankingsResult] = await Promise.all([
     supabase
-      .from('reviews')
+      .from('activity_log')
       .select(
         `
         id,
-        movies (runtime_minutes)
+        content_id,
+        content:content_id (
+          id,
+          content_type,
+          runtime_minutes,
+          total_episodes,
+          episode_runtime
+        )
       `
       )
-      .eq('user_id', userId),
+      .eq('user_id', userId)
+      .eq('status', 'completed'),
     supabase
       .from('rankings')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId),
   ]);
 
-  const reviews = reviewsResult.data || [];
-  const totalMinutes = reviews.reduce((acc, r) => {
-    const movie = r.movies as { runtime_minutes: number } | null;
-    return acc + (movie?.runtime_minutes || 0);
+  const activities = activitiesResult.data || [];
+
+  // Deduplicate by content_id - only count each title once
+  const uniqueContentMap = new Map<number, any>();
+  for (const activity of activities) {
+    if (!uniqueContentMap.has(activity.content_id)) {
+      uniqueContentMap.set(activity.content_id, activity);
+    }
+  }
+
+  // Calculate total watch time from unique titles
+  const totalMinutes = Array.from(uniqueContentMap.values()).reduce((acc, activity) => {
+    const content = activity.content as {
+      content_type: string;
+      runtime_minutes?: number;
+      total_episodes?: number;
+      episode_runtime?: number;
+    } | null;
+
+    if (!content) return acc;
+
+    // For movies: use runtime_minutes
+    if (content.content_type === 'movie') {
+      return acc + (content.runtime_minutes || 0);
+    }
+
+    // For TV shows: use runtime_minutes if available, otherwise calculate
+    if (content.content_type === 'tv') {
+      if (content.runtime_minutes) {
+        return acc + content.runtime_minutes;
+      }
+      // Calculate from episodes if runtime not available
+      if (content.total_episodes && content.episode_runtime) {
+        return acc + content.total_episodes * content.episode_runtime;
+      }
+    }
+
+    return acc;
   }, 0);
 
   return {
-    totalFilms: reviews.length,
+    totalFilms: uniqueContentMap.size,
     totalMinutes,
     rankingsCount: rankingsResult.count || 0,
   };

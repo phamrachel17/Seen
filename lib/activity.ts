@@ -177,7 +177,8 @@ export async function getActivityById(activityId: string): Promise<Activity | nu
     .select(`
       *,
       content:content_id (*),
-      user:user_id (id, username, display_name, profile_image_url)
+      user:user_id (id, username, display_name, profile_image_url),
+      watch:watch_id (*)
     `)
     .eq('id', activityId)
     .single();
@@ -199,7 +200,8 @@ export async function getUserActivitiesForContent(
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      watch:watch_id (*)
     `)
     .eq('user_id', userId)
     .eq('content_id', contentId)
@@ -222,7 +224,8 @@ export async function getUserLatestActivityForContent(
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      watch:watch_id (*)
     `)
     .eq('user_id', userId)
     .eq('content_id', contentId)
@@ -248,7 +251,8 @@ export async function getUserCompletedActivity(
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      watch:watch_id (*)
     `)
     .eq('user_id', userId)
     .eq('content_id', contentId)
@@ -279,7 +283,8 @@ export async function getUserInProgressActivity(
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      watch:watch_id (*)
     `)
     .eq('user_id', userId)
     .eq('content_id', contentId)
@@ -346,7 +351,8 @@ export async function getFeedActivities(
     .select(`
       *,
       content:content_id (*),
-      user:user_id (id, username, display_name, profile_image_url)
+      user:user_id (id, username, display_name, profile_image_url),
+      watch:watch_id (*)
     `)
     .in('user_id', followingIds)
     .eq('is_private', false)
@@ -376,7 +382,8 @@ export async function getFriendsActivitiesForContent(
     .select(`
       *,
       content:content_id (*),
-      user:user_id (id, username, display_name, profile_image_url)
+      user:user_id (id, username, display_name, profile_image_url),
+      watch:watch_id (*)
     `)
     .eq('content_id', contentId)
     .in('user_id', followingIds)
@@ -462,6 +469,12 @@ export function getProgressPercent(activity: Activity): number {
   }
 
   return 0;
+}
+
+// Check if activity is truly in progress (< 100%)
+export function isActivityInProgress(activity: Activity): boolean {
+  const percent = getProgressPercent(activity);
+  return percent > 0 && percent < 100;
 }
 
 // ============================================

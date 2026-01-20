@@ -38,28 +38,28 @@ export default function WatchlistScreen() {
     if (!targetUserId) return;
 
     try {
-      const { data, error } = await supabase
+      const { data, error} = await supabase
         .from('bookmarks')
         .select(`
           created_at,
-          movies (*)
+          content:content_id (*)
         `)
         .eq('user_id', targetUserId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false});
 
       if (error) {
         console.error('Error loading watchlist:', error);
         return;
       }
 
-      const bookmarkedMovies: BookmarkedMovie[] = (data || [])
-        .filter((item: any) => item.movies)
+      const bookmarkedContent: BookmarkedMovie[] = (data || [])
+        .filter((item: any) => item.content)
         .map((item: any) => ({
-          ...item.movies,
+          ...item.content,
           bookmarked_at: item.created_at,
         }));
 
-      setMovies(bookmarkedMovies);
+      setMovies(bookmarkedContent);
     } finally {
       setIsLoading(false);
     }
@@ -79,8 +79,8 @@ export default function WatchlistScreen() {
     setIsRefreshing(false);
   };
 
-  const navigateToMovie = (movieId: number) => {
-    router.push(`/title/${movieId}?type=movie` as any);
+  const navigateToContent = (tmdbId: number, contentType: string) => {
+    router.push(`/title/${tmdbId}?type=${contentType}` as any);
   };
 
   return (
@@ -103,6 +103,7 @@ export default function WatchlistScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >
@@ -131,7 +132,7 @@ export default function WatchlistScreen() {
                   styles.movieItem,
                   pressed && styles.itemPressed,
                 ]}
-                onPress={() => navigateToMovie(movie.id)}
+                onPress={() => navigateToContent(movie.tmdb_id, movie.content_type)}
               >
                 {/* Poster */}
                 {movie.poster_url ? (

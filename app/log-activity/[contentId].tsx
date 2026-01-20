@@ -474,6 +474,22 @@ export default function LogActivityModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.contentId, params.tmdbId, params.contentType]);
 
+  // Reset form fields when switching to a new watch
+  useEffect(() => {
+    // Only reset if we're in the in-progress step and active watch exists
+    if (selectedStatus === 'in_progress' && activeWatch) {
+      // Check if existingInProgress belongs to current activeWatch
+      if (existingInProgress && existingInProgress.watch_id !== activeWatch.id) {
+        // Different watch - reset form
+        setNote('');
+        setProgressMinutes('');
+        setProgressSeason(1);
+        setProgressEpisode(1);
+        setExistingInProgress(null);
+      }
+    }
+  }, [activeWatch, selectedStatus, existingInProgress]);
+
   // Load episodes when season changes (for TV shows)
   useEffect(() => {
     if (tvDetails && progressSeason > 0) {
@@ -566,7 +582,8 @@ export default function LogActivityModal() {
             setStep('existing_choice');  // Show choice screen
           }
         }
-        if (inProgress) {
+        // Pre-fill in-progress form ONLY if it belongs to the current active watch
+        if (inProgress && watch && inProgress.watch_id === watch.id) {
           setExistingInProgress(inProgress);
           setNote(inProgress.note || '');
           setProgressMinutes(inProgress.progress_minutes?.toString() || '');
@@ -584,6 +601,13 @@ export default function LogActivityModal() {
             setSelectedStatus('in_progress');
             setStep('in_progress');  // Skip choice screen, go directly to in-progress form
           }
+        } else if (inProgress) {
+          // Starting a new watch or no matching activity - reset to defaults
+          setExistingInProgress(null);
+          setNote('');
+          setProgressMinutes('');
+          setProgressSeason(1);
+          setProgressEpisode(1);
         }
       }
     } catch (error) {
@@ -607,12 +631,8 @@ export default function LogActivityModal() {
   };
 
   const handleStatusSelect = (status: ActivityStatus) => {
-    // Check if selecting in_progress and there's an active incomplete watch
-    if (status === 'in_progress' && activeWatch && activeWatchProgress < 100) {
-      // Go to watch conflict step instead of modal
-      setStep('watch_conflict');
-      return;
-    }
+    // Skip conflict screen - go directly to in-progress form
+    // Active watch will be used automatically
     setSelectedStatus(status);
     setStep(status);
   };
@@ -1002,7 +1022,12 @@ export default function LogActivityModal() {
                 <IconSymbol name="play.circle.fill" size={24} color={Colors.textMuted} />
               </View>
               <View style={styles.statusOptionContent}>
-                <Text style={styles.statusOptionTitle}>In Progress</Text>
+                <Text style={styles.statusOptionTitle}>
+                  {activeWatch
+                    ? `Continue Watch #${activeWatch.watch_number}`
+                    : `Start Watch #${nextWatchNumber}`
+                  }
+                </Text>
                 <Text style={styles.statusOptionDescription}>Still watching</Text>
               </View>
               <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />

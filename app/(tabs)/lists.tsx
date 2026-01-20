@@ -14,7 +14,7 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { getUserActivities } from '@/lib/activity';
+import { getUserActivities, isActivityInProgress } from '@/lib/activity';
 import { Movie, Ranking, Bookmark, Activity } from '@/types';
 
 interface RankedMovie extends Movie {
@@ -86,7 +86,20 @@ export default function ListsScreen() {
   const loadCurrentlyWatching = useCallback(async () => {
     if (!user) return;
     const activities = await getUserActivities(user.id, 'in_progress');
-    setCurrentlyWatching(activities);
+
+    // Deduplicate by content_id FIRST, keeping the most recent activity per content
+    const latestByContent = new Map<number, Activity>();
+    for (const activity of activities) {
+      const contentId = activity.content_id;
+      if (!latestByContent.has(contentId)) {
+        latestByContent.set(contentId, activity);
+      }
+    }
+
+    // Filter to only include activities that are truly in progress (< 100%)
+    const activeInProgress = Array.from(latestByContent.values()).filter(isActivityInProgress);
+
+    setCurrentlyWatching(activeInProgress);
   }, [user]);
 
   // Refresh data when screen comes into focus
@@ -140,6 +153,7 @@ export default function ListsScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >

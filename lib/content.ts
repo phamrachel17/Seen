@@ -112,6 +112,7 @@ async function ensureTVContent(tmdbId: number): Promise<Content | null> {
       release_year: showDetails.release_year,
       total_seasons: showDetails.total_seasons,
       total_episodes: showDetails.total_episodes,
+      episode_runtime: showDetails.episode_runtime,
       genres: showDetails.genres,
       synopsis: showDetails.synopsis,
       popularity_score: showDetails.popularity_score,

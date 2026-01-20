@@ -138,6 +138,7 @@ export default function FeedScreen() {
               refreshing={isRefreshing}
               onRefresh={onRefresh}
               tintColor={Colors.stamp}
+              colors={[Colors.stamp]}
             />
           }
           ItemSeparatorComponent={() => <View style={styles.separator} />}

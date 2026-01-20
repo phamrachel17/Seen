@@ -17,7 +17,7 @@ import { ProfileListRow } from '@/components/profile-list-row';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
-import { getUserActivities } from '@/lib/activity';
+import { getUserActivities, isActivityInProgress } from '@/lib/activity';
 import { Movie, Review, User } from '@/types';
 
 interface ReviewWithMovie extends Review {
@@ -63,24 +63,65 @@ export default function ProfileScreen() {
         setProfileData(profile);
       }
 
-      // Load reviews count and total watch time
-      const { data: reviews, error: reviewsError } = await supabase
-        .from('reviews')
+      // Load completed activities count and total watch time
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activity_log')
         .select(`
           id,
-          movies (runtime_minutes)
+          content_id,
+          content:content_id (
+            id,
+            content_type,
+            runtime_minutes,
+            total_episodes,
+            episode_runtime
+          )
         `)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .eq('status', 'completed');
 
-      if (!reviewsError && reviews) {
-        const totalMinutes = reviews.reduce((acc, r) => {
-          const movie = r.movies as { runtime_minutes: number } | null;
-          return acc + (movie?.runtime_minutes || 0);
+      if (!activitiesError && activities) {
+        // Deduplicate by content_id
+        const uniqueContentMap = new Map<number, any>();
+        for (const activity of activities) {
+          if (!uniqueContentMap.has(activity.content_id)) {
+            uniqueContentMap.set(activity.content_id, activity);
+          }
+        }
+
+        // Calculate total watch time from unique titles
+        const totalMinutes = Array.from(uniqueContentMap.values()).reduce((acc, activity) => {
+          const content = activity.content as {
+            content_type: string;
+            runtime_minutes?: number;
+            total_episodes?: number;
+            episode_runtime?: number;
+          } | null;
+
+          if (!content) return acc;
+
+          // For movies: use runtime_minutes
+          if (content.content_type === 'movie') {
+            return acc + (content.runtime_minutes || 0);
+          }
+
+          // For TV shows: use runtime_minutes if available, otherwise calculate
+          if (content.content_type === 'tv') {
+            if (content.runtime_minutes) {
+              return acc + content.runtime_minutes;
+            }
+            // Calculate from episodes if runtime not available
+            if (content.total_episodes && content.episode_runtime) {
+              return acc + content.total_episodes * content.episode_runtime;
+            }
+          }
+
+          return acc;
         }, 0);
 
         setStats((prev) => ({
           ...prev,
-          totalFilms: reviews.length,
+          totalFilms: uniqueContentMap.size,
           totalMinutes,
         }));
       }
@@ -106,7 +147,19 @@ export default function ProfileScreen() {
 
       // Load currently watching count
       const inProgressActivities = await getUserActivities(user.id, 'in_progress');
-      setCurrentlyWatchingCount(inProgressActivities.length);
+
+      // Deduplicate by content_id FIRST to match display logic in currently-watching screen
+      const uniqueContent = new Map<number, any>();
+      for (const activity of inProgressActivities) {
+        if (!uniqueContent.has(activity.content_id)) {
+          uniqueContent.set(activity.content_id, activity);
+        }
+      }
+
+      // Filter to only count activities that are truly in progress (< 100%)
+      const activeInProgress = Array.from(uniqueContent.values()).filter(isActivityInProgress);
+
+      setCurrentlyWatchingCount(activeInProgress.length);
 
       // Load recent reviews
       const { data: recentData, error: recentError } = await supabase
@@ -187,6 +240,7 @@ export default function ProfileScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             tintColor={Colors.stamp}
+            colors={[Colors.stamp]}
           />
         }
       >

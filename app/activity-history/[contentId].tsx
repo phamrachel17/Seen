@@ -173,6 +173,11 @@ export default function ActivityHistoryScreen() {
               size={16}
               color={isCompleted ? Colors.stamp : Colors.textMuted}
             />
+            {activity.watch && (
+              <View style={styles.watchBadge}>
+                <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
+              </View>
+            )}
             <Text style={[styles.statusText, isCompleted && styles.statusTextCompleted]}>
               {isCompleted ? 'Completed' : 'In Progress'}
             </Text>
@@ -302,6 +307,7 @@ export default function ActivityHistoryScreen() {
               refreshing={isRefreshing}
               onRefresh={onRefresh}
               tintColor={Colors.stamp}
+              colors={[Colors.stamp]}
             />
           }
         />
@@ -544,5 +550,17 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.white,
+  },
+  watchBadge: {
+    backgroundColor: Colors.dust,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 1,
+    borderRadius: BorderRadius.sm,
+    marginHorizontal: Spacing.xs,
+  },
+  watchBadgeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.xs,
+    color: Colors.text,
   },
 });
