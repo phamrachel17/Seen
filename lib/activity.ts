@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Activity, ActivityStatus, Content, ContentType } from '@/types';
+import { Activity, ActivityStatus, Content, ContentType, Watch, WatchStatus, WatchWithActivities } from '@/types';
 import { ensureContentExists } from './content';
 
 export interface CreateActivityParams {
@@ -20,6 +20,8 @@ export interface CreateActivityParams {
   taggedFriends?: string[];
   isPrivate?: boolean;
   ratedSeason?: number;
+  // Watch association (for in_progress activities)
+  watchId?: string;
 }
 
 export interface UpdateActivityParams {
@@ -46,7 +48,14 @@ export async function createActivity(params: CreateActivityParams): Promise<Acti
     return null;
   }
 
-  const activityData = {
+  // For in_progress activities, ensure we have a watch to link to
+  let watchId = params.watchId;
+  if (params.status === 'in_progress' && !watchId) {
+    const watch = await getOrCreateActiveWatch(params.userId, content.id);
+    watchId = watch?.id;
+  }
+
+  const activityData: Record<string, any> = {
     user_id: params.userId,
     content_id: content.id,
     status: params.status,
@@ -61,6 +70,11 @@ export async function createActivity(params: CreateActivityParams): Promise<Acti
     is_private: params.isPrivate ?? false,
     rated_season: params.ratedSeason,
   };
+
+  // Link to watch if available
+  if (watchId) {
+    activityData.watch_id = watchId;
+  }
 
   const { data, error } = await supabase
     .from('activity_log')
@@ -141,7 +155,8 @@ export async function getActivityById(activityId: string): Promise<Activity | nu
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      user:user_id (id, username, display_name, profile_image_url)
     `)
     .eq('id', activityId)
     .single();
@@ -270,7 +285,8 @@ export async function getUserActivities(
     .from('activity_log')
     .select(`
       *,
-      content:content_id (*)
+      content:content_id (*),
+      watch:watch_id (*)
     `)
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
@@ -361,6 +377,7 @@ function transformActivity(data: any): Activity {
     user_id: data.user_id,
     content_id: data.content_id,
     status: data.status,
+    watch_id: data.watch_id,
     star_rating: data.star_rating,
     review_text: data.review_text,
     note: data.note,
@@ -374,6 +391,7 @@ function transformActivity(data: any): Activity {
     created_at: data.created_at,
     content: data.content,
     user: data.user,
+    watch: data.watch,
   };
 }
 
@@ -423,4 +441,287 @@ export function getProgressPercent(activity: Activity): number {
   }
 
   return 0;
+}
+
+// ============================================
+// WATCH FUNCTIONS
+// ============================================
+
+// Transform database row to Watch type
+function transformWatch(data: any): Watch {
+  return {
+    id: data.id,
+    user_id: data.user_id,
+    content_id: data.content_id,
+    watch_number: data.watch_number,
+    status: data.status,
+    started_at: data.started_at,
+    completed_at: data.completed_at,
+    created_at: data.created_at,
+    content: data.content,
+    activities: data.activities?.map(transformActivity),
+  };
+}
+
+// Get user's current active (in_progress) watch for content
+export async function getActiveWatch(
+  userId: string,
+  contentId: number
+): Promise<Watch | null> {
+  const { data, error } = await supabase
+    .from('watches')
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .eq('status', 'in_progress')
+    .order('watch_number', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching active watch:', error);
+    return null;
+  }
+
+  return data ? transformWatch(data) : null;
+}
+
+// Get watch count for a user's content (for determining next watch number)
+export async function getWatchCount(
+  userId: string,
+  contentId: number
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('watches')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('content_id', contentId);
+
+  if (error) {
+    console.error('Error getting watch count:', error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+// Start a new watch for content
+export async function startNewWatch(
+  userId: string,
+  contentId: number
+): Promise<Watch | null> {
+  const watchCount = await getWatchCount(userId, contentId);
+  const watchNumber = watchCount + 1;
+
+  const { data, error } = await supabase
+    .from('watches')
+    .insert({
+      user_id: userId,
+      content_id: contentId,
+      watch_number: watchNumber,
+      status: 'in_progress',
+    })
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error starting new watch:', error);
+    return null;
+  }
+
+  return transformWatch(data);
+}
+
+// Get or create an active watch for content
+// If an in_progress watch exists, return it; otherwise create a new one
+export async function getOrCreateActiveWatch(
+  userId: string,
+  contentId: number
+): Promise<Watch | null> {
+  const activeWatch = await getActiveWatch(userId, contentId);
+  if (activeWatch) {
+    return activeWatch;
+  }
+  return startNewWatch(userId, contentId);
+}
+
+// Complete a watch (mark as completed)
+export async function completeWatch(watchId: string): Promise<Watch | null> {
+  const { data, error } = await supabase
+    .from('watches')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', watchId)
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error completing watch:', error);
+    return null;
+  }
+
+  return transformWatch(data);
+}
+
+// Abandon a watch (for starting a new rewatch)
+export async function abandonWatch(watchId: string): Promise<Watch | null> {
+  const { data, error } = await supabase
+    .from('watches')
+    .update({
+      status: 'abandoned',
+    })
+    .eq('id', watchId)
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error abandoning watch:', error);
+    return null;
+  }
+
+  return transformWatch(data);
+}
+
+// Get all watches for a user's content with their activities (for activity history)
+export async function getWatchesForContent(
+  userId: string,
+  contentId: number
+): Promise<WatchWithActivities[]> {
+  // First get all watches for this content
+  const { data: watches, error: watchError } = await supabase
+    .from('watches')
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .order('watch_number', { ascending: false });
+
+  if (watchError) {
+    console.error('Error fetching watches:', watchError);
+    return [];
+  }
+
+  if (!watches || watches.length === 0) {
+    return [];
+  }
+
+  // Get all activities for this user and content
+  const { data: activities, error: activityError } = await supabase
+    .from('activity_log')
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .order('created_at', { ascending: false });
+
+  if (activityError) {
+    console.error('Error fetching activities for watches:', activityError);
+    return [];
+  }
+
+  // Group activities by watch_id
+  const activitiesByWatch = new Map<string, Activity[]>();
+  const unlinkedActivities: Activity[] = [];
+
+  for (const activity of activities || []) {
+    const transformed = transformActivity(activity);
+    if (activity.watch_id) {
+      const existing = activitiesByWatch.get(activity.watch_id) || [];
+      existing.push(transformed);
+      activitiesByWatch.set(activity.watch_id, existing);
+    } else {
+      unlinkedActivities.push(transformed);
+    }
+  }
+
+  // Build WatchWithActivities for each watch
+  const result: WatchWithActivities[] = watches.map((watch) => {
+    const watchActivities = activitiesByWatch.get(watch.id) || [];
+    const latestActivity = watchActivities[0];
+
+    return {
+      ...transformWatch(watch),
+      activities: watchActivities,
+      latestProgress: latestActivity ? formatProgress(latestActivity) : undefined,
+      progressPercent: latestActivity ? getProgressPercent(latestActivity) : undefined,
+    };
+  });
+
+  // If there are unlinked activities (from before migration), create a virtual "Watch #0"
+  // to display them (edge case for legacy data)
+  if (unlinkedActivities.length > 0) {
+    const legacyWatch: WatchWithActivities = {
+      id: 'legacy',
+      user_id: userId,
+      content_id: contentId,
+      watch_number: 0,
+      status: 'completed',
+      started_at: unlinkedActivities[unlinkedActivities.length - 1]?.created_at || '',
+      created_at: unlinkedActivities[unlinkedActivities.length - 1]?.created_at || '',
+      activities: unlinkedActivities,
+      latestProgress: unlinkedActivities[0] ? formatProgress(unlinkedActivities[0]) : undefined,
+      progressPercent: unlinkedActivities[0] ? getProgressPercent(unlinkedActivities[0]) : undefined,
+    };
+    result.push(legacyWatch);
+  }
+
+  return result;
+}
+
+// Get a specific watch by ID
+export async function getWatchById(watchId: string): Promise<Watch | null> {
+  const { data, error } = await supabase
+    .from('watches')
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .eq('id', watchId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching watch:', error);
+    return null;
+  }
+
+  return transformWatch(data);
+}
+
+// Get latest activity for a watch
+export async function getLatestActivityForWatch(watchId: string): Promise<Activity | null> {
+  const { data, error } = await supabase
+    .from('activity_log')
+    .select(`
+      *,
+      content:content_id (*)
+    `)
+    .eq('watch_id', watchId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching latest activity for watch:', error);
+    return null;
+  }
+
+  return data ? transformActivity(data) : null;
 }

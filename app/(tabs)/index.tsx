@@ -28,6 +28,7 @@ export default function FeedScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const loadFeed = useCallback(async () => {
     if (!user) {
@@ -59,6 +60,8 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       loadFeed();
+      // Increment refreshKey to trigger card interaction reloads
+      setRefreshKey((prev) => prev + 1);
     }, [loadFeed])
   );
 
@@ -73,7 +76,7 @@ export default function FeedScreen() {
   };
 
   const renderItem = ({ item }: { item: Activity }) => (
-    <ActivityFeedCard activity={item} />
+    <ActivityFeedCard activity={item} refreshKey={refreshKey} />
   );
 
   const renderHeader = () => (

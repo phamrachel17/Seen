@@ -7,20 +7,78 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { formatProgress } from '@/lib/activity';
+import { getActivityLikes, toggleActivityLike, getActivityCommentCount, createNotification } from '@/lib/social';
+import { useAuth } from '@/lib/auth-context';
 import { Activity } from '@/types';
 
 interface ActivityFeedCardProps {
   activity: Activity;
   onPress?: () => void;
+  onLikeChange?: () => void;
+  refreshKey?: number;
 }
 
-export function ActivityFeedCard({ activity, onPress }: ActivityFeedCardProps) {
+export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }: ActivityFeedCardProps) {
   const router = useRouter();
+  const { user: currentUser } = useAuth();
 
   const content = activity.content;
-  const user = activity.user;
+  const activityUser = activity.user;
 
-  if (!content || !user) {
+  const [likeCount, setLikeCount] = useState(0);
+  const [isLiked, setIsLiked] = useState(false);
+  const [isLikeLoading, setIsLikeLoading] = useState(false);
+  const [commentCount, setCommentCount] = useState(0);
+
+  useEffect(() => {
+    loadInteractions();
+  }, [activity.id, refreshKey]);
+
+  const loadInteractions = async () => {
+    const [likes, comments] = await Promise.all([
+      getActivityLikes(activity.id, currentUser?.id),
+      getActivityCommentCount(activity.id),
+    ]);
+    setLikeCount(likes.count);
+    setIsLiked(likes.likedByUser);
+    setCommentCount(comments);
+  };
+
+  const handleLikePress = useCallback(async () => {
+    if (!currentUser || isLikeLoading) return;
+
+    setIsLikeLoading(true);
+
+    // Optimistic update
+    const wasLiked = isLiked;
+    setIsLiked(!wasLiked);
+    setLikeCount((prev) => (wasLiked ? prev - 1 : prev + 1));
+
+    const success = await toggleActivityLike(currentUser.id, activity.id, wasLiked);
+
+    if (!success) {
+      // Revert on failure
+      setIsLiked(wasLiked);
+      setLikeCount((prev) => (wasLiked ? prev + 1 : prev - 1));
+    } else if (!wasLiked && activity.user_id !== currentUser.id) {
+      // Send notification on new like (not to self)
+      await createNotification({
+        user_id: activity.user_id,
+        actor_id: currentUser.id,
+        type: 'like',
+        activity_id: activity.id,
+      });
+    }
+
+    setIsLikeLoading(false);
+    onLikeChange?.();
+  }, [currentUser, isLikeLoading, isLiked, activity.id, activity.user_id, onLikeChange]);
+
+  const handleCommentPress = () => {
+    router.push(`/activity-detail/${activity.id}`);
+  };
+
+  if (!content || !activityUser) {
     return null;
   }
 
@@ -103,14 +161,14 @@ export function ActivityFeedCard({ activity, onPress }: ActivityFeedCardProps) {
       <View style={styles.userHeader}>
         <Pressable style={styles.userInfo} onPress={handleUserPress}>
           <ProfileAvatar
-            imageUrl={user.profile_image_url}
-            username={user.username}
+            imageUrl={activityUser.profile_image_url}
+            username={activityUser.username}
             size="small"
             variant="circle"
           />
           <View style={styles.userTextContainer}>
             <Text style={styles.displayName} numberOfLines={1}>
-              {user.display_name || user.username}
+              {activityUser.display_name || activityUser.username}
             </Text>
             <View style={styles.timestampRow}>
               <Text style={styles.timestamp}>{formatDate(activity.created_at)}</Text>
@@ -187,15 +245,31 @@ export function ActivityFeedCard({ activity, onPress }: ActivityFeedCardProps) {
 
       {/* Actions Row */}
       <View style={styles.actionsRow}>
-        {/* Like Button (placeholder for future) */}
-        <View style={styles.actionButton}>
-          <IconSymbol name="heart" size={24} color={Colors.textMuted} />
-        </View>
+        {/* Like Button */}
+        <Pressable
+          style={styles.actionButton}
+          onPress={handleLikePress}
+          disabled={isLikeLoading}
+        >
+          <IconSymbol
+            name={isLiked ? 'heart.fill' : 'heart'}
+            size={24}
+            color={isLiked ? Colors.stamp : Colors.textMuted}
+          />
+          {likeCount > 0 && (
+            <Text style={[styles.actionCount, isLiked && styles.actionCountActive]}>
+              {likeCount}
+            </Text>
+          )}
+        </Pressable>
 
-        {/* Comment Button (placeholder for future) */}
-        <View style={styles.actionButton}>
+        {/* Comment Button */}
+        <Pressable style={styles.actionButton} onPress={handleCommentPress}>
           <IconSymbol name="bubble.left" size={24} color={Colors.textMuted} />
-        </View>
+          {commentCount > 0 && (
+            <Text style={styles.actionCount}>{commentCount}</Text>
+          )}
+        </Pressable>
 
         {/* Spacer */}
         <View style={{ flex: 1 }} />
@@ -351,6 +425,14 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
     paddingRight: Spacing.md,
+  },
+  actionCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
+  },
+  actionCountActive: {
+    color: Colors.stamp,
   },
   typeIndicator: {
     padding: Spacing.xs,

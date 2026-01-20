@@ -123,12 +123,40 @@ export interface Content {
 // Activity status
 export type ActivityStatus = 'completed' | 'in_progress';
 
+// Watch status for tracking viewing cycles
+export type WatchStatus = 'in_progress' | 'completed' | 'abandoned';
+
+// Watch represents one continuous viewing cycle (including rewatches)
+export interface Watch {
+  id: string;
+  user_id: string;
+  content_id: number;
+  watch_number: number; // 1, 2, 3... for rewatches
+  status: WatchStatus;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
+  // Joined data
+  content?: Content;
+  activities?: Activity[];
+}
+
+// Watch with activities for grouped display
+export interface WatchWithActivities extends Watch {
+  activities: Activity[];
+  latestProgress?: string; // Formatted progress string
+  progressPercent?: number;
+}
+
 // Activity log entry
 export interface Activity {
   id: string;
   user_id: string;
   content_id: number;
   status: ActivityStatus;
+  // Watch association
+  watch_id?: string;
+  watch?: Watch;
   // Completed activity fields
   star_rating?: number; // 1-5, only for completed
   review_text?: string;

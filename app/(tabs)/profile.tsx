@@ -17,6 +17,7 @@ import { ProfileListRow } from '@/components/profile-list-row';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
+import { getUserActivities } from '@/lib/activity';
 import { Movie, Review, User } from '@/types';
 
 interface ReviewWithMovie extends Review {
@@ -45,6 +46,7 @@ export default function ProfileScreen() {
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
   const [watchlistCount, setWatchlistCount] = useState(0);
+  const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
 
   const loadUserData = useCallback(async () => {
     if (!user) return;
@@ -101,6 +103,10 @@ export default function ProfileScreen() {
         .eq('user_id', user.id);
 
       setWatchlistCount(wlCount || 0);
+
+      // Load currently watching count
+      const inProgressActivities = await getUserActivities(user.id, 'in_progress');
+      setCurrentlyWatchingCount(inProgressActivities.length);
 
       // Load recent reviews
       const { data: recentData, error: recentError } = await supabase
@@ -286,6 +292,12 @@ export default function ProfileScreen() {
             count={watchlistCount}
             onPress={() => router.push('/watchlist')}
             icon="bookmark"
+          />
+          <ProfileListRow
+            title="Currently Watching"
+            count={currentlyWatchingCount}
+            onPress={() => router.push('/currently-watching')}
+            icon="play.circle"
           />
         </View>
 

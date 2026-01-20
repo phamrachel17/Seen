@@ -159,6 +159,7 @@ interface CreateNotificationData {
   actor_id: string;
   type: 'like' | 'comment' | 'tagged' | 'follow';
   review_id?: string;
+  activity_id?: string; // Maps to review_id column since IDs match
   comment_id?: string;
 }
 
@@ -168,7 +169,16 @@ export async function createNotification(
   // Don't create notification if user is notifying themselves
   if (data.user_id === data.actor_id) return;
 
-  const { error } = await supabase.from('notifications').insert(data);
+  // Map activity_id to review_id column since IDs match for migrated data
+  const insertData: Record<string, unknown> = {
+    user_id: data.user_id,
+    actor_id: data.actor_id,
+    type: data.type,
+    review_id: data.review_id || data.activity_id, // Use activity_id if review_id not provided
+    comment_id: data.comment_id,
+  };
+
+  const { error } = await supabase.from('notifications').insert(insertData);
 
   if (error) {
     console.error('Error creating notification:', error);
@@ -335,6 +345,135 @@ export async function getSuggestedFriends(
     const following = await getFollowingUsers(userId);
     return following.slice(0, limit);
   }
+}
+
+// ============ ACTIVITY LIKES/COMMENTS ============
+// These functions work with activity_log entries
+// Note: Since reviews were migrated to activity_log with the same IDs,
+// we can reuse the existing likes/comments tables with activity IDs
+
+export async function likeActivity(
+  userId: string,
+  activityId: string
+): Promise<boolean> {
+  // Use review_id column since activity IDs match review IDs for migrated data
+  const { error } = await supabase
+    .from('likes')
+    .insert({ user_id: userId, review_id: activityId });
+
+  if (error) {
+    console.error('Error liking activity:', error);
+    // FK constraint error means the activity doesn't have a corresponding review
+    // Run migration 010_activity_likes_support.sql to fix this
+  }
+
+  return !error;
+}
+
+export async function unlikeActivity(
+  userId: string,
+  activityId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('likes')
+    .delete()
+    .eq('user_id', userId)
+    .eq('review_id', activityId);
+
+  return !error;
+}
+
+export async function getActivityLikes(
+  activityId: string,
+  currentUserId?: string
+): Promise<{ count: number; likedByUser: boolean }> {
+  const { count, error } = await supabase
+    .from('likes')
+    .select('id', { count: 'exact', head: true })
+    .eq('review_id', activityId);
+
+  if (error) {
+    return { count: 0, likedByUser: false };
+  }
+
+  let likedByUser = false;
+  if (currentUserId) {
+    const { data } = await supabase
+      .from('likes')
+      .select('id')
+      .eq('review_id', activityId)
+      .eq('user_id', currentUserId)
+      .maybeSingle();
+    likedByUser = !!data;
+  }
+
+  return { count: count || 0, likedByUser };
+}
+
+export async function toggleActivityLike(
+  userId: string,
+  activityId: string,
+  isCurrentlyLiked: boolean
+): Promise<boolean> {
+  if (isCurrentlyLiked) {
+    return unlikeActivity(userId, activityId);
+  } else {
+    return likeActivity(userId, activityId);
+  }
+}
+
+export async function getActivityCommentCount(activityId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('comments')
+    .select('id', { count: 'exact', head: true })
+    .eq('review_id', activityId);
+
+  if (error) return 0;
+  return count || 0;
+}
+
+export async function getActivityComments(activityId: string): Promise<Comment[]> {
+  const { data, error } = await supabase
+    .from('comments')
+    .select(`
+      *,
+      user:users!comments_user_id_fkey (id, username, display_name, profile_image_url)
+    `)
+    .eq('review_id', activityId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) {
+    console.error('Error fetching activity comments:', error);
+    return [];
+  }
+
+  return data as Comment[];
+}
+
+export async function addActivityComment(
+  userId: string,
+  activityId: string,
+  content: string
+): Promise<Comment | null> {
+  const { data, error } = await supabase
+    .from('comments')
+    .insert({
+      user_id: userId,
+      review_id: activityId,
+      content: content.trim(),
+    })
+    .select(`
+      *,
+      user:users!comments_user_id_fkey (id, username, display_name, profile_image_url)
+    `)
+    .single();
+
+  if (error || !data) {
+    console.error('Error adding activity comment:', error);
+    return null;
+  }
+
+  return data as Comment;
 }
 
 // ============ FRIENDS' REVIEWS ============

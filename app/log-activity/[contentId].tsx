@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,19 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
+  Modal,
+  Animated as RNAnimated,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  runOnJS,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,12 +33,321 @@ import { SuggestedFriendPills } from '@/components/suggested-friend-pills';
 import { useAuth } from '@/lib/auth-context';
 import { getPendingFriendSelection } from '@/lib/friend-picker-state';
 import { getContentById, ensureContentExists } from '@/lib/content';
-import { createActivity, updateActivity, getUserCompletedActivity, getUserInProgressActivity } from '@/lib/activity';
-import { Activity } from '@/types';
+import {
+  createActivity,
+  updateActivity,
+  getUserCompletedActivity,
+  getUserInProgressActivity,
+  getActiveWatch,
+  abandonWatch,
+  startNewWatch,
+  getProgressPercent,
+  getLatestActivityForWatch,
+} from '@/lib/activity';
+import { Activity, Watch } from '@/types';
 import { getMovieDetails, getTVShowDetails, getSeasonDetails } from '@/lib/tmdb';
 import { Content, ContentType, MovieDetails, TVShowDetails, Episode, ActivityStatus } from '@/types';
 
 type Step = 'existing_choice' | 'status' | 'completed' | 'in_progress';
+
+// Movie Progress Slider Component
+const MovieProgressSlider = ({
+  value,
+  maxValue,
+  onChange,
+}: {
+  value: number;
+  maxValue: number;
+  onChange: (val: number) => void;
+}) => {
+  const sliderWidth = useSharedValue(0);
+  const translateX = useSharedValue(0);
+  const isDragging = useSharedValue(false);
+
+  // Sync position when value changes externally (from TextInput)
+  useEffect(() => {
+    if (!isDragging.value && sliderWidth.value > 0 && maxValue > 0) {
+      translateX.value = (value / maxValue) * sliderWidth.value;
+    }
+  }, [value, maxValue]);
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      isDragging.value = true;
+    })
+    .onUpdate((e) => {
+      const newX = Math.max(0, Math.min(e.x, sliderWidth.value));
+      translateX.value = newX;
+      const newValue = Math.round((newX / sliderWidth.value) * maxValue);
+      runOnJS(onChange)(newValue);
+    })
+    .onEnd(() => {
+      isDragging.value = false;
+      runOnJS(Haptics.selectionAsync)();
+    });
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: Math.max(0, translateX.value - 16) }],
+  }));
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: translateX.value,
+  }));
+
+  const progressPercent = maxValue > 0 ? Math.min(100, (value / maxValue) * 100) : 0;
+
+  return (
+    <View
+      style={sliderStyles.container}
+      onLayout={(e) => {
+        sliderWidth.value = e.nativeEvent.layout.width;
+        if (maxValue > 0) {
+          translateX.value = (value / maxValue) * e.nativeEvent.layout.width;
+        }
+      }}
+    >
+      <GestureDetector gesture={panGesture}>
+        <View style={sliderStyles.track}>
+          <Animated.View style={[sliderStyles.fill, fillStyle]} />
+          <Animated.View style={[sliderStyles.thumb, thumbStyle]}>
+            <Text style={sliderStyles.thumbText}>{value}</Text>
+          </Animated.View>
+        </View>
+      </GestureDetector>
+      <Text style={sliderStyles.percentText}>{Math.round(progressPercent)}%</Text>
+    </View>
+  );
+};
+
+const sliderStyles = StyleSheet.create({
+  container: {
+    marginTop: Spacing.lg,
+    height: 50,
+  },
+  track: {
+    height: 8,
+    backgroundColor: Colors.dust,
+    borderRadius: 4,
+    marginTop: 18,
+  },
+  fill: {
+    height: '100%',
+    backgroundColor: Colors.stamp,
+    borderRadius: 4,
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  thumb: {
+    position: 'absolute',
+    top: -18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.stamp,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  thumbText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.xs,
+    color: Colors.white,
+  },
+  percentText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    marginTop: Spacing.sm,
+  },
+});
+
+// iOS-style Wheel Picker for TV Shows
+const WHEEL_ITEM_HEIGHT = 32;
+const WHEEL_VISIBLE_ITEMS = 5; // 2 above + selected + 2 below
+const WHEEL_PICKER_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ITEMS;
+
+const WheelPicker = ({
+  value,
+  minValue,
+  maxValue,
+  onChange,
+  label,
+}: {
+  value: number;
+  minValue: number;
+  maxValue: number;
+  onChange: (val: number) => void;
+  label: string;
+}) => {
+  const scrollViewRef = useRef<any>(null);
+  const data = Array.from({ length: maxValue - minValue + 1 }, (_, i) => minValue + i);
+
+  // Padding items to allow first/last items to center
+  const paddedData: (number | null)[] = [null, null, ...data, null, null];
+
+  // Track scroll position for animated styling
+  const scrollY = useRef(new RNAnimated.Value(0)).current;
+
+  // Scroll to initial value on mount
+  useEffect(() => {
+    const index = value - minValue;
+    const offset = index * WHEEL_ITEM_HEIGHT;
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: offset, animated: false });
+    }, 50);
+  }, []);
+
+  // Handle when maxValue changes (episode count changes with season)
+  useEffect(() => {
+    if (value > maxValue) {
+      onChange(maxValue);
+    }
+  }, [maxValue]);
+
+  const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const index = Math.round(offsetY / WHEEL_ITEM_HEIGHT);
+    const newValue = Math.min(maxValue, Math.max(minValue, minValue + index));
+
+    if (newValue !== value) {
+      onChange(newValue);
+      Haptics.selectionAsync();
+    }
+  };
+
+  const renderItem = (item: number | null, index: number) => {
+    if (item === null) {
+      // Padding items (empty space)
+      return <View key={`pad-${index}`} style={wheelStyles.item} />;
+    }
+
+    // Calculate distance from center for styling
+    const inputRange = [
+      (index - 4) * WHEEL_ITEM_HEIGHT,
+      (index - 3) * WHEEL_ITEM_HEIGHT,
+      (index - 2) * WHEEL_ITEM_HEIGHT, // Center (selected)
+      (index - 1) * WHEEL_ITEM_HEIGHT,
+      (index) * WHEEL_ITEM_HEIGHT,
+    ];
+
+    const scale = scrollY.interpolate({
+      inputRange,
+      outputRange: [0.75, 0.85, 1.0, 0.85, 0.75],
+      extrapolate: 'clamp',
+    });
+
+    const opacity = scrollY.interpolate({
+      inputRange,
+      outputRange: [0.25, 0.5, 1.0, 0.5, 0.25],
+      extrapolate: 'clamp',
+    });
+
+    return (
+      <RNAnimated.View
+        key={item}
+        style={[
+          wheelStyles.item,
+          { transform: [{ scale }], opacity },
+        ]}
+      >
+        <Text style={wheelStyles.itemText}>{item}</Text>
+      </RNAnimated.View>
+    );
+  };
+
+  return (
+    <View style={wheelStyles.container}>
+      <Text style={wheelStyles.label}>{label}</Text>
+      <View style={wheelStyles.pickerWrapper}>
+        {/* Center highlight lines */}
+        <View style={wheelStyles.highlightTop} />
+        <View style={wheelStyles.highlightBottom} />
+
+        <RNAnimated.ScrollView
+          ref={scrollViewRef}
+          showsVerticalScrollIndicator={false}
+          snapToInterval={WHEEL_ITEM_HEIGHT}
+          decelerationRate="fast"
+          bounces={false}
+          onScroll={RNAnimated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true }
+          )}
+          onMomentumScrollEnd={handleScrollEnd}
+          onScrollEndDrag={(e) => {
+            // Handle case where user drags slowly without momentum
+            const velocity = e.nativeEvent.velocity?.y || 0;
+            if (Math.abs(velocity) < 0.5) {
+              handleScrollEnd(e);
+            }
+          }}
+          nestedScrollEnabled={true}
+          style={wheelStyles.scrollView}
+        >
+          {paddedData.map((item, index) => renderItem(item, index))}
+        </RNAnimated.ScrollView>
+      </View>
+    </View>
+  );
+};
+
+const wheelStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  label: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    marginBottom: Spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  pickerWrapper: {
+    height: WHEEL_PICKER_HEIGHT,
+    width: 70,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  scrollView: {
+    height: WHEEL_PICKER_HEIGHT,
+  },
+  item: {
+    height: WHEEL_ITEM_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  itemText: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  highlightTop: {
+    position: 'absolute',
+    top: WHEEL_ITEM_HEIGHT * 2,
+    left: 4,
+    right: 4,
+    height: 1,
+    backgroundColor: Colors.border,
+    zIndex: 1,
+  },
+  highlightBottom: {
+    position: 'absolute',
+    top: WHEEL_ITEM_HEIGHT * 3,
+    left: 4,
+    right: 4,
+    height: 1,
+    backgroundColor: Colors.border,
+    zIndex: 1,
+  },
+});
 
 export default function LogActivityModal() {
   const params = useLocalSearchParams<{
@@ -54,6 +374,11 @@ export default function LogActivityModal() {
   const [selectedStatus, setSelectedStatus] = useState<ActivityStatus | null>(null);
   const [existingCompleted, setExistingCompleted] = useState<Activity | null>(null);
   const [existingInProgress, setExistingInProgress] = useState<Activity | null>(null);
+
+  // Watch state
+  const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
+  const [showRewatchConfirm, setShowRewatchConfirm] = useState(false);
+  const [activeWatchProgress, setActiveWatchProgress] = useState<number>(0);
 
   // Common form state
   const [watchDate, setWatchDate] = useState<Date>(new Date());
@@ -125,12 +450,22 @@ export default function LogActivityModal() {
         setTVDetails(details);
       }
 
-      // Check for existing activities
+      // Check for existing activities and active watch
       if (user) {
-        const [completed, inProgress] = await Promise.all([
+        const [completed, inProgress, watch] = await Promise.all([
           getUserCompletedActivity(user.id, contentData.id),
           getUserInProgressActivity(user.id, contentData.id),
+          getActiveWatch(user.id, contentData.id),
         ]);
+
+        // Set active watch and calculate progress
+        if (watch) {
+          setActiveWatch(watch);
+          const latestActivity = await getLatestActivityForWatch(watch.id);
+          if (latestActivity) {
+            setActiveWatchProgress(getProgressPercent(latestActivity));
+          }
+        }
 
         // Pre-fill if user has existing activity
         if (completed) {
@@ -194,8 +529,41 @@ export default function LogActivityModal() {
   };
 
   const handleStatusSelect = (status: ActivityStatus) => {
+    // Check if selecting in_progress and there's an active incomplete watch
+    if (status === 'in_progress' && activeWatch && activeWatchProgress < 100) {
+      // Show rewatch confirmation
+      setShowRewatchConfirm(true);
+      return;
+    }
     setSelectedStatus(status);
     setStep(status);
+  };
+
+  const handleContinueCurrentWatch = () => {
+    setShowRewatchConfirm(false);
+    setSelectedStatus('in_progress');
+    setStep('in_progress');
+  };
+
+  const handleStartRewatch = async () => {
+    if (!activeWatch || !user || !content) return;
+
+    setShowRewatchConfirm(false);
+    // Abandon the current watch and start a new one
+    await abandonWatch(activeWatch.id);
+    const newWatch = await startNewWatch(user.id, content.id);
+    if (newWatch) {
+      setActiveWatch(newWatch);
+      setActiveWatchProgress(0);
+      // Clear in-progress form fields for fresh start
+      setNote('');
+      setProgressMinutes('');
+      setProgressSeason(1);
+      setProgressEpisode(1);
+      setExistingInProgress(null);
+    }
+    setSelectedStatus('in_progress');
+    setStep('in_progress');
   };
 
   const handleBack = () => {
@@ -229,20 +597,6 @@ export default function LogActivityModal() {
           isPrivate,
           ratedSeason: content.content_type === 'tv' ? ratedSeason : undefined,
         });
-      } else if (selectedStatus === 'in_progress' && existingInProgress) {
-        // EDIT existing in-progress activity
-        activity = await updateActivity({
-          activityId: existingInProgress.id,
-          note: note.trim() || undefined,
-          progressMinutes: content.content_type === 'movie'
-            ? parseInt(progressMinutes, 10) || undefined
-            : undefined,
-          progressSeason: content.content_type === 'tv' ? progressSeason : undefined,
-          progressEpisode: content.content_type === 'tv' ? progressEpisode : undefined,
-          watchDate,
-          taggedFriends,
-          isPrivate,
-        });
       } else {
         // CREATE new activity (in_progress, or completed for first time)
         activity = await createActivity({
@@ -268,6 +622,8 @@ export default function LogActivityModal() {
           ratedSeason: selectedStatus === 'completed' && content.content_type === 'tv'
             ? ratedSeason
             : undefined,
+          // Link to active watch for in_progress activities
+          watchId: selectedStatus === 'in_progress' ? activeWatch?.id : undefined,
         });
       }
 
@@ -367,6 +723,11 @@ export default function LogActivityModal() {
                 ]}>
                   {selectedStatus === 'completed' ? 'Completed' : 'In Progress'}
                 </Text>
+                {selectedStatus === 'in_progress' && activeWatch && (
+                  <View style={styles.watchNumberBadge}>
+                    <Text style={styles.watchNumberText}>Watch #{activeWatch.watch_number}</Text>
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -652,17 +1013,12 @@ export default function LogActivityModal() {
                   />
                   <Text style={styles.progressLabel}>/ {runtime || '?'} min</Text>
                 </View>
-                {runtime && parseInt(progressMinutes, 10) > 0 && (
-                  <View style={styles.progressBar}>
-                    <View
-                      style={[
-                        styles.progressBarFill,
-                        {
-                          width: `${Math.min(100, (parseInt(progressMinutes, 10) / runtime) * 100)}%`,
-                        },
-                      ]}
-                    />
-                  </View>
+                {runtime && (
+                  <MovieProgressSlider
+                    value={parseInt(progressMinutes, 10) || 0}
+                    maxValue={runtime}
+                    onChange={(val) => setProgressMinutes(val.toString())}
+                  />
                 )}
               </View>
             )}
@@ -672,42 +1028,20 @@ export default function LogActivityModal() {
               <View style={styles.progressSection}>
                 <Text style={styles.sectionLabel}>PROGRESS</Text>
                 <View style={styles.tvProgressRow}>
-                  <View style={styles.tvProgressPicker}>
-                    <Text style={styles.tvProgressLabel}>Season</Text>
-                    <View style={styles.pickerWrapper}>
-                      <Pressable
-                        style={styles.pickerButton}
-                        onPress={() => setProgressSeason(Math.max(1, progressSeason - 1))}
-                      >
-                        <IconSymbol name="minus" size={16} color={Colors.text} />
-                      </Pressable>
-                      <Text style={styles.pickerValue}>{progressSeason}</Text>
-                      <Pressable
-                        style={styles.pickerButton}
-                        onPress={() => setProgressSeason(Math.min(totalSeasons, progressSeason + 1))}
-                      >
-                        <IconSymbol name="plus" size={16} color={Colors.text} />
-                      </Pressable>
-                    </View>
-                  </View>
-                  <View style={styles.tvProgressPicker}>
-                    <Text style={styles.tvProgressLabel}>Episode</Text>
-                    <View style={styles.pickerWrapper}>
-                      <Pressable
-                        style={styles.pickerButton}
-                        onPress={() => setProgressEpisode(Math.max(1, progressEpisode - 1))}
-                      >
-                        <IconSymbol name="minus" size={16} color={Colors.text} />
-                      </Pressable>
-                      <Text style={styles.pickerValue}>{progressEpisode}</Text>
-                      <Pressable
-                        style={styles.pickerButton}
-                        onPress={() => setProgressEpisode(Math.min(episodes.length || 99, progressEpisode + 1))}
-                      >
-                        <IconSymbol name="plus" size={16} color={Colors.text} />
-                      </Pressable>
-                    </View>
-                  </View>
+                  <WheelPicker
+                    value={progressSeason}
+                    minValue={1}
+                    maxValue={totalSeasons}
+                    onChange={setProgressSeason}
+                    label="Season"
+                  />
+                  <WheelPicker
+                    value={progressEpisode}
+                    minValue={1}
+                    maxValue={episodes.length || 99}
+                    onChange={setProgressEpisode}
+                    label="Episode"
+                  />
                 </View>
                 {episodes.length > 0 && episodes[progressEpisode - 1] && (
                   <Text style={styles.episodeTitle}>
@@ -808,14 +1142,61 @@ export default function LogActivityModal() {
               {isSaving ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
-                <Text style={styles.saveButtonText}>
-                  {existingInProgress ? 'Update Progress' : 'Save Progress'}
-                </Text>
+                <Text style={styles.saveButtonText}>Log Progress</Text>
               )}
             </Pressable>
           </View>
         )}
       </ScrollView>
+
+      {/* Rewatch Confirmation Modal */}
+      <Modal
+        visible={showRewatchConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRewatchConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Unfinished Watch</Text>
+            <Text style={styles.modalMessage}>
+              You have an unfinished watch at {activeWatchProgress}%. What would you like to do?
+            </Text>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalButton,
+                styles.modalButtonPrimary,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleContinueCurrentWatch}
+            >
+              <Text style={styles.modalButtonTextPrimary}>Continue Watch #{activeWatch?.watch_number}</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalButton,
+                styles.modalButtonSecondary,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleStartRewatch}
+            >
+              <Text style={styles.modalButtonTextSecondary}>Start New Rewatch</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={() => setShowRewatchConfirm(false)}
+            >
+              <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1193,5 +1574,76 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  // Watch number badge
+  watchNumberBadge: {
+    marginLeft: Spacing.sm,
+    backgroundColor: Colors.dust,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  watchNumberText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.xs,
+    color: Colors.text,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    width: '100%',
+    maxWidth: 340,
+  },
+  modalTitle: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.xl,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  modalMessage: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginBottom: Spacing.xl,
+  },
+  modalButton: {
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  modalButtonPrimary: {
+    backgroundColor: Colors.stamp,
+  },
+  modalButtonSecondary: {
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalButtonTextPrimary: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.white,
+  },
+  modalButtonTextSecondary: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
+  modalButtonTextCancel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
   },
 });

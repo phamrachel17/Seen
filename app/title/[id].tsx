@@ -8,6 +8,7 @@ import {
   Dimensions,
   Animated,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,6 +26,9 @@ import {
   getUserInProgressActivity,
   getFriendsActivitiesForContent,
   formatProgress,
+  createActivity,
+  deleteActivity,
+  getActiveWatch,
 } from '@/lib/activity';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
@@ -36,6 +40,7 @@ import {
   Activity,
   ContentType,
   Ranking,
+  Watch,
 } from '@/types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -57,12 +62,16 @@ export default function TitleDetailScreen() {
 
   // UI state
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [isTogglingBookmark, setIsTogglingBookmark] = useState(false);
+  const [isInProgress, setIsInProgress] = useState(false);
+  const [isTogglingInProgress, setIsTogglingInProgress] = useState(false);
 
   // Activity state
   const [completedActivity, setCompletedActivity] = useState<Activity | null>(null);
   const [inProgressActivity, setInProgressActivity] = useState<Activity | null>(null);
+  const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [friendsActivities, setFriendsActivities] = useState<Activity[]>([]);
 
@@ -125,12 +134,13 @@ export default function TitleDetailScreen() {
     if (!user) return;
 
     try {
-      // Load user's activities, bookmark, ranking, and friends' activities in parallel
+      // Load user's activities, bookmark, ranking, watch, and friends' activities in parallel
       const followingIds = await getFollowingIds(user.id);
 
-      const [completed, inProgress, bookmark, ranking, friendsActs] = await Promise.all([
+      const [completed, inProgress, watch, bookmark, ranking, friendsActs] = await Promise.all([
         getUserCompletedActivity(user.id, contentId),
         getUserInProgressActivity(user.id, contentId),
+        getActiveWatch(user.id, contentId),
         checkBookmarkStatus(tmdbId),
         loadUserRanking(tmdbId),
         getFriendsActivitiesForContent(user.id, contentId, followingIds),
@@ -138,6 +148,8 @@ export default function TitleDetailScreen() {
 
       setCompletedActivity(completed);
       setInProgressActivity(inProgress);
+      setActiveWatch(watch);
+      setIsInProgress(!!inProgress);
       setIsBookmarked(!!bookmark);
       setUserRanking(ranking);
       setFriendsActivities(friendsActs.slice(0, 5)); // Limit to 5 friends
@@ -183,6 +195,18 @@ export default function TitleDetailScreen() {
     }
   };
 
+  const onRefresh = async () => {
+    if (!id) return;
+    setIsRefreshing(true);
+    try {
+      const tmdbId = parseInt(id, 10);
+      const contentType = type || 'movie';
+      await loadContent(tmdbId, contentType);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const toggleBookmark = async () => {
     if (!content || !user || isTogglingBookmark) return;
 
@@ -208,6 +232,39 @@ export default function TitleDetailScreen() {
       console.error('Error toggling bookmark:', error);
     } finally {
       setIsTogglingBookmark(false);
+    }
+  };
+
+  const toggleInProgress = async () => {
+    if (!content || !user || isTogglingInProgress) return;
+
+    setIsTogglingInProgress(true);
+
+    try {
+      if (isInProgress) {
+        // Remove: Find and delete the in-progress activity
+        const activity = await getUserInProgressActivity(user.id, content.id);
+        if (activity) {
+          await deleteActivity(activity.id);
+        }
+        setIsInProgress(false);
+        setInProgressActivity(null);
+      } else {
+        // Add: Create a simple in-progress activity
+        const activity = await createActivity({
+          userId: user.id,
+          tmdbId: content.tmdb_id,
+          contentType: content.content_type,
+          status: 'in_progress',
+          watchDate: new Date(),
+        });
+        setIsInProgress(!!activity);
+        setInProgressActivity(activity);
+      }
+    } catch (error) {
+      console.error('Error toggling in-progress:', error);
+    } finally {
+      setIsTogglingInProgress(false);
     }
   };
 
@@ -335,6 +392,14 @@ export default function TitleDetailScreen() {
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
           { useNativeDriver: false }
         )}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.stamp}
+            progressViewOffset={HEADER_MIN_HEIGHT}
+          />
+        }
       >
         {/* Title Info */}
         <View style={styles.infoContainer}>
@@ -362,17 +427,30 @@ export default function TitleDetailScreen() {
                 <Text style={styles.noRatings}>No ratings yet</Text>
               )}
             </View>
-            <Pressable
-              onPress={toggleBookmark}
-              style={styles.bookmarkButtonInline}
-              disabled={isTogglingBookmark}
-            >
-              <IconSymbol
-                name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
-                size={22}
-                color={Colors.stamp}
-              />
-            </Pressable>
+            <View style={styles.actionButtons}>
+              <Pressable
+                onPress={toggleInProgress}
+                style={styles.inProgressButtonInline}
+                disabled={isTogglingInProgress}
+              >
+                <IconSymbol
+                  name={isInProgress ? 'play.circle.fill' : 'play.circle'}
+                  size={22}
+                  color={Colors.stamp}
+                />
+              </Pressable>
+              <Pressable
+                onPress={toggleBookmark}
+                style={styles.bookmarkButtonInline}
+                disabled={isTogglingBookmark}
+              >
+                <IconSymbol
+                  name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
+                  size={22}
+                  color={Colors.stamp}
+                />
+              </Pressable>
+            </View>
           </View>
 
           {/* Meta Row */}
@@ -490,9 +568,16 @@ export default function TitleDetailScreen() {
           {inProgressActivity && (
             <View style={styles.yourProgressSection}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionLabel}>Your Progress:</Text>
+                <View style={styles.sectionLabelRow}>
+                  <Text style={styles.sectionLabel}>Your Progress:</Text>
+                  {activeWatch && (
+                    <View style={styles.watchNumberBadge}>
+                      <Text style={styles.watchNumberText}>Watch #{activeWatch.watch_number}</Text>
+                    </View>
+                  )}
+                </View>
                 <Pressable onPress={() => router.push(`/activity-history/${content?.id}`)}>
-                  <Text style={styles.viewAllLink}>View All</Text>
+                  <Text style={styles.viewAllLink}>View All Watches</Text>
                 </Pressable>
               </View>
               <Pressable
@@ -741,6 +826,14 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: 'italic',
   },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  inProgressButtonInline: {
+    padding: Spacing.xs,
+  },
   bookmarkButtonInline: {
     padding: Spacing.xs,
   },
@@ -838,6 +931,22 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontFamily: Fonts.serifSemiBold,
     fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  sectionLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  watchNumberBadge: {
+    backgroundColor: Colors.dust,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  watchNumberText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.xs,
     color: Colors.text,
   },
   viewAllLink: {

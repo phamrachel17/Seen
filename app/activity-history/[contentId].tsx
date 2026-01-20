@@ -5,7 +5,8 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  FlatList,
+  SectionList,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,8 +16,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { useAuth } from '@/lib/auth-context';
 import { getContentById } from '@/lib/content';
-import { getUserActivitiesForContent, formatProgress, deleteActivity } from '@/lib/activity';
-import { Content, Activity } from '@/types';
+import { getWatchesForContent, formatProgress, deleteActivity } from '@/lib/activity';
+import { Content, Activity, WatchWithActivities } from '@/types';
 
 export default function ActivityHistoryScreen() {
   const { contentId } = useLocalSearchParams<{ contentId: string }>();
@@ -25,8 +26,9 @@ export default function ActivityHistoryScreen() {
   const { user } = useAuth();
 
   const [content, setContent] = useState<Content | null>(null);
-  const [activities, setActivities] = useState<Activity[]>([]);
+  const [watches, setWatches] = useState<WatchWithActivities[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     if (contentId && user) {
@@ -39,13 +41,13 @@ export default function ActivityHistoryScreen() {
     try {
       setIsLoading(true);
 
-      const [contentData, activitiesData] = await Promise.all([
+      const [contentData, watchesData] = await Promise.all([
         getContentById(id),
-        user ? getUserActivitiesForContent(user.id, id) : [],
+        user ? getWatchesForContent(user.id, id) : [],
       ]);
 
       setContent(contentData);
-      setActivities(activitiesData);
+      setWatches(watchesData);
     } catch (error) {
       console.error('Error loading activity history:', error);
     } finally {
@@ -53,10 +55,23 @@ export default function ActivityHistoryScreen() {
     }
   };
 
+  const onRefresh = async () => {
+    if (!contentId) return;
+    setIsRefreshing(true);
+    await loadData(parseInt(contentId, 10));
+    setIsRefreshing(false);
+  };
+
   const handleDeleteActivity = async (activityId: string) => {
     const success = await deleteActivity(activityId);
     if (success) {
-      setActivities((prev) => prev.filter((a) => a.id !== activityId));
+      // Update watches by removing the activity from its watch
+      setWatches((prevWatches) =>
+        prevWatches.map((watch) => ({
+          ...watch,
+          activities: watch.activities.filter((a) => a.id !== activityId),
+        })).filter((watch) => watch.activities.length > 0) // Remove empty watches
+      );
     }
   };
 
@@ -74,6 +89,32 @@ export default function ActivityHistoryScreen() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  const getWatchStatusLabel = (status: string) => {
+    switch (status) {
+      case 'in_progress':
+        return 'In Progress';
+      case 'completed':
+        return 'Completed';
+      case 'abandoned':
+        return 'Abandoned';
+      default:
+        return status;
+    }
+  };
+
+  const getWatchStatusColor = (status: string) => {
+    switch (status) {
+      case 'in_progress':
+        return Colors.textMuted;
+      case 'completed':
+        return Colors.stamp;
+      case 'abandoned':
+        return Colors.textMuted;
+      default:
+        return Colors.textMuted;
+    }
+  };
+
   const renderStars = (rating: number) => {
     return (
       <View style={styles.starsContainer}>
@@ -85,6 +126,34 @@ export default function ActivityHistoryScreen() {
             color={star <= rating ? Colors.starFilled : Colors.starEmpty}
           />
         ))}
+      </View>
+    );
+  };
+
+  const renderWatchHeader = (watch: WatchWithActivities) => {
+    const isLegacy = watch.id === 'legacy';
+    const statusColor = getWatchStatusColor(watch.status);
+
+    return (
+      <View style={styles.watchHeader}>
+        <View style={styles.watchHeaderLeft}>
+          <Text style={styles.watchNumber}>
+            {isLegacy ? 'Previous Activity' : `Watch #${watch.watch_number}`}
+          </Text>
+          <View style={[styles.watchStatusBadge, { backgroundColor: statusColor + '20' }]}>
+            <Text style={[styles.watchStatusText, { color: statusColor }]}>
+              {getWatchStatusLabel(watch.status)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.watchHeaderRight}>
+          {watch.latestProgress && (
+            <Text style={styles.watchProgress}>{watch.latestProgress}</Text>
+          )}
+          {watch.progressPercent !== undefined && watch.progressPercent > 0 && (
+            <Text style={styles.watchProgressPercent}>{watch.progressPercent}%</Text>
+          )}
+        </View>
       </View>
     );
   };
@@ -166,6 +235,12 @@ export default function ActivityHistoryScreen() {
     );
   };
 
+  // Transform watches into SectionList data format
+  const sections = watches.map((watch) => ({
+    watch,
+    data: watch.activities,
+  }));
+
   if (isLoading) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
@@ -181,7 +256,7 @@ export default function ActivityHistoryScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Activity History</Text>
+        <Text style={styles.headerTitle}>Watch History</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -201,24 +276,39 @@ export default function ActivityHistoryScreen() {
               {content.release_year}
               {content.content_type === 'tv' && content.total_seasons && ` • ${content.total_seasons} Seasons`}
             </Text>
+            {watches.length > 0 && (
+              <Text style={styles.watchCount}>
+                {watches.length} {watches.length === 1 ? 'watch' : 'watches'}
+              </Text>
+            )}
           </View>
         </View>
       )}
 
-      {/* Activities List */}
-      {activities.length > 0 ? (
-        <FlatList
-          data={activities}
+      {/* Watches List */}
+      {sections.length > 0 ? (
+        <SectionList
+          sections={sections}
           renderItem={renderActivityCard}
+          renderSectionHeader={({ section }) => renderWatchHeader(section.watch)}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={() => <View style={styles.activitySeparator} />}
+          SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
+          stickySectionHeadersEnabled={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.stamp}
+            />
+          }
         />
       ) : (
         <View style={styles.emptyState}>
           <IconSymbol name="clock" size={48} color={Colors.textMuted} />
-          <Text style={styles.emptyText}>No activity history yet</Text>
+          <Text style={styles.emptyText}>No watch history yet</Text>
           <Pressable
             style={styles.logButton}
             onPress={() => router.push(`/log-activity/${contentId}`)}
@@ -293,11 +383,60 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
   },
+  watchCount: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
+    marginTop: Spacing.xs,
+  },
   listContent: {
     padding: Spacing.lg,
   },
-  separator: {
-    height: Spacing.lg,
+  watchHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    backgroundColor: Colors.background,
+  },
+  watchHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  watchNumber: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  watchStatusBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  watchStatusText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.xs,
+  },
+  watchHeaderRight: {
+    alignItems: 'flex-end',
+  },
+  watchProgress: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+  },
+  watchProgressPercent: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+  },
+  activitySeparator: {
+    height: Spacing.md,
+  },
+  sectionSeparator: {
+    height: Spacing.xl,
   },
   activityCard: {
     backgroundColor: Colors.cardBackground,

@@ -14,7 +14,8 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, Ranking, Bookmark } from '@/types';
+import { getUserActivities } from '@/lib/activity';
+import { Movie, Ranking, Bookmark, Activity } from '@/types';
 
 interface RankedMovie extends Movie {
   ranking: Ranking;
@@ -31,6 +32,7 @@ export default function ListsScreen() {
 
   const [rankingsCount, setRankingsCount] = useState(0);
   const [watchlist, setWatchlist] = useState<BookmarkedMovie[]>([]);
+  const [currentlyWatching, setCurrentlyWatching] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadRankingsCount = useCallback(async () => {
@@ -81,24 +83,35 @@ export default function ListsScreen() {
     setWatchlist(bookmarkedMovies);
   }, [user]);
 
+  const loadCurrentlyWatching = useCallback(async () => {
+    if (!user) return;
+    const activities = await getUserActivities(user.id, 'in_progress');
+    setCurrentlyWatching(activities);
+  }, [user]);
+
   // Refresh data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       if (user) {
         loadRankingsCount();
         loadWatchlist();
+        loadCurrentlyWatching();
       }
-    }, [user, loadRankingsCount, loadWatchlist])
+    }, [user, loadRankingsCount, loadWatchlist, loadCurrentlyWatching])
   );
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadRankingsCount(), loadWatchlist()]);
+    await Promise.all([loadRankingsCount(), loadWatchlist(), loadCurrentlyWatching()]);
     setIsRefreshing(false);
   };
 
   const navigateToMovie = (movieId: number) => {
     router.push(`/title/${movieId}?type=movie` as any);
+  };
+
+  const navigateToContent = (tmdbId: number, contentType: string) => {
+    router.push(`/title/${tmdbId}?type=${contentType}` as any);
   };
 
   const navigateToRankings = () => {
@@ -199,6 +212,68 @@ export default function ListsScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
               Bookmark films to watch later
+            </Text>
+          </View>
+        )}
+
+        {/* Currently Watching Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Currently Watching</Text>
+          {currentlyWatching.length > 0 ? (
+            <Text style={styles.countBadge}>{currentlyWatching.length} titles</Text>
+          ) : null}
+        </View>
+
+        {currentlyWatching.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.watchlistScroll}
+          >
+            {currentlyWatching.map((activity) => (
+              <Pressable
+                key={activity.id}
+                style={({ pressed }) => [
+                  styles.watchlistCard,
+                  pressed && styles.cardPressed,
+                ]}
+                onPress={() => navigateToContent(activity.content?.tmdb_id || activity.content_id, activity.content?.content_type || 'movie')}
+              >
+                <View style={styles.posterContainer}>
+                  {activity.content?.poster_url ? (
+                    <Image
+                      source={{ uri: activity.content.poster_url }}
+                      style={styles.watchlistPoster}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={[styles.watchlistPoster, styles.posterPlaceholder]}>
+                      <Text style={styles.placeholderLetter}>
+                        {activity.content?.title?.[0] || '?'}
+                      </Text>
+                    </View>
+                  )}
+                  {/* Progress badge */}
+                  {(activity.progress_season || activity.progress_minutes) && (
+                    <View style={styles.progressBadge}>
+                      <Text style={styles.progressBadgeText}>
+                        {activity.content?.content_type === 'tv'
+                          ? `S${activity.progress_season || 1}`
+                          : `${activity.progress_minutes || 0}m`}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.watchlistTitle} numberOfLines={2}>
+                  {activity.content?.title || 'Unknown'}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>
+              Start watching something to track progress
             </Text>
           </View>
         )}
@@ -359,5 +434,22 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
     marginBottom: Spacing.lg,
+  },
+  posterContainer: {
+    position: 'relative',
+  },
+  progressBadge: {
+    position: 'absolute',
+    bottom: Spacing.xs,
+    left: Spacing.xs,
+    backgroundColor: Colors.stamp,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  progressBadgeText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.xs,
+    color: Colors.white,
   },
 });
