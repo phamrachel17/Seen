@@ -97,6 +97,27 @@ export async function createActivity(params: CreateActivityParams): Promise<Acti
     return null;
   }
 
+  // Auto-complete watch if progress reaches 100%
+  if (params.status === 'in_progress' && watchId) {
+    let isComplete = false;
+
+    if (content.content_type === 'movie') {
+      // Movie: check if progress_minutes >= runtime
+      if (params.progressMinutes && content.runtime_minutes) {
+        isComplete = params.progressMinutes >= content.runtime_minutes;
+      }
+    } else if (content.content_type === 'tv') {
+      // TV: complete when user reaches final season
+      if (params.progressSeason && content.total_seasons) {
+        isComplete = params.progressSeason >= content.total_seasons;
+      }
+    }
+
+    if (isComplete) {
+      await completeWatch(watchId);
+    }
+  }
+
   return transformActivity(data);
 }
 

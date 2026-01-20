@@ -10,7 +10,6 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
-  Modal,
   Animated as RNAnimated,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -43,12 +42,14 @@ import {
   startNewWatch,
   getProgressPercent,
   getLatestActivityForWatch,
+  getWatchCount,
+  formatProgress,
 } from '@/lib/activity';
 import { Activity, Watch } from '@/types';
 import { getMovieDetails, getTVShowDetails, getSeasonDetails } from '@/lib/tmdb';
 import { Content, ContentType, MovieDetails, TVShowDetails, Episode, ActivityStatus } from '@/types';
 
-type Step = 'existing_choice' | 'status' | 'completed' | 'in_progress';
+type Step = 'existing_choice' | 'watch_conflict' | 'status' | 'completed' | 'in_progress';
 
 // Movie Progress Slider Component
 const MovieProgressSlider = ({
@@ -349,6 +350,77 @@ const wheelStyles = StyleSheet.create({
   },
 });
 
+// Watch Context Header Component
+const WatchContextHeader = ({
+  watchNumber,
+  progress,
+  progressText,
+  contentType,
+}: {
+  watchNumber: number;
+  progress: number;
+  progressText: string;
+  contentType: 'movie' | 'tv';
+}) => {
+  return (
+    <View style={watchHeaderStyles.container}>
+      <View style={watchHeaderStyles.topRow}>
+        <Text style={watchHeaderStyles.watchLabel}>WATCH #{watchNumber}</Text>
+        <Text style={watchHeaderStyles.progressPercent}>{progress}% complete</Text>
+      </View>
+      <View style={watchHeaderStyles.progressBarContainer}>
+        <View style={[watchHeaderStyles.progressBarFill, { width: `${Math.min(100, progress)}%` }]} />
+      </View>
+      {progressText && (
+        <Text style={watchHeaderStyles.progressDetail}>{progressText}</Text>
+      )}
+    </View>
+  );
+};
+
+const watchHeaderStyles = StyleSheet.create({
+  container: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  watchLabel: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
+    letterSpacing: 1,
+  },
+  progressPercent: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  progressBarContainer: {
+    height: 6,
+    backgroundColor: Colors.dust,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: Colors.stamp,
+    borderRadius: 3,
+  },
+  progressDetail: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
+  },
+});
+
 export default function LogActivityModal() {
   const params = useLocalSearchParams<{
     contentId?: string;
@@ -377,8 +449,9 @@ export default function LogActivityModal() {
 
   // Watch state
   const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
-  const [showRewatchConfirm, setShowRewatchConfirm] = useState(false);
   const [activeWatchProgress, setActiveWatchProgress] = useState<number>(0);
+  const [latestProgressText, setLatestProgressText] = useState<string>('');
+  const [nextWatchNumber, setNextWatchNumber] = useState<number>(1);
 
   // Common form state
   const [watchDate, setWatchDate] = useState<Date>(new Date());
@@ -452,11 +525,15 @@ export default function LogActivityModal() {
 
       // Check for existing activities and active watch
       if (user) {
-        const [completed, inProgress, watch] = await Promise.all([
+        const [completed, inProgress, watch, watchCount] = await Promise.all([
           getUserCompletedActivity(user.id, contentData.id),
           getUserInProgressActivity(user.id, contentData.id),
           getActiveWatch(user.id, contentData.id),
+          getWatchCount(user.id, contentData.id),
         ]);
+
+        // Calculate next watch number (for display)
+        setNextWatchNumber(watchCount + 1);
 
         // Set active watch and calculate progress
         if (watch) {
@@ -464,6 +541,7 @@ export default function LogActivityModal() {
           const latestActivity = await getLatestActivityForWatch(watch.id);
           if (latestActivity) {
             setActiveWatchProgress(getProgressPercent(latestActivity));
+            setLatestProgressText(formatProgress(latestActivity));
           }
         }
 
@@ -531,8 +609,8 @@ export default function LogActivityModal() {
   const handleStatusSelect = (status: ActivityStatus) => {
     // Check if selecting in_progress and there's an active incomplete watch
     if (status === 'in_progress' && activeWatch && activeWatchProgress < 100) {
-      // Show rewatch confirmation
-      setShowRewatchConfirm(true);
+      // Go to watch conflict step instead of modal
+      setStep('watch_conflict');
       return;
     }
     setSelectedStatus(status);
@@ -540,7 +618,6 @@ export default function LogActivityModal() {
   };
 
   const handleContinueCurrentWatch = () => {
-    setShowRewatchConfirm(false);
     setSelectedStatus('in_progress');
     setStep('in_progress');
   };
@@ -548,13 +625,14 @@ export default function LogActivityModal() {
   const handleStartRewatch = async () => {
     if (!activeWatch || !user || !content) return;
 
-    setShowRewatchConfirm(false);
     // Abandon the current watch and start a new one
     await abandonWatch(activeWatch.id);
     const newWatch = await startNewWatch(user.id, content.id);
     if (newWatch) {
       setActiveWatch(newWatch);
       setActiveWatchProgress(0);
+      setLatestProgressText('');
+      setNextWatchNumber(newWatch.watch_number + 1);
       // Clear in-progress form fields for fresh start
       setNote('');
       setProgressMinutes('');
@@ -569,6 +647,9 @@ export default function LogActivityModal() {
   const handleBack = () => {
     if (step === 'existing_choice' || step === 'status') {
       router.back();
+    } else if (step === 'watch_conflict') {
+      // Return to status or existing_choice
+      setStep(existingCompleted ? 'existing_choice' : 'status');
     } else if (params.editMode === 'true' || params.editInProgress === 'true') {
       // If user came directly to edit form, back should close the modal
       router.back();
@@ -736,9 +817,8 @@ export default function LogActivityModal() {
         {/* Step 0: Existing Choice (for already-ranked titles) */}
         {step === 'existing_choice' && existingCompleted && (
           <View style={styles.existingChoiceSection}>
-            <Text style={styles.stepTitle}>You've already rated this</Text>
-
-            {/* Show existing rating preview */}
+            {/* Rating Section */}
+            <Text style={styles.stepTitle}>Your Rating</Text>
             <View style={styles.existingRatingPreview}>
               <View style={styles.existingStarsRow}>
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -757,6 +837,25 @@ export default function LogActivityModal() {
               )}
             </View>
 
+            {/* Watch Status Section */}
+            <View style={styles.watchStatusSection}>
+              {activeWatch ? (
+                <WatchContextHeader
+                  watchNumber={activeWatch.watch_number}
+                  progress={activeWatchProgress}
+                  progressText={latestProgressText}
+                  contentType={contentType || 'movie'}
+                />
+              ) : (
+                <View style={styles.watchCompleteInfo}>
+                  <IconSymbol name="checkmark.circle.fill" size={16} color={Colors.stamp} />
+                  <Text style={styles.watchCompleteText}>
+                    Watch #{nextWatchNumber - 1 || 1} Complete
+                  </Text>
+                </View>
+              )}
+            </View>
+
             {/* Option 1: Edit existing */}
             <Pressable
               style={({ pressed }) => [
@@ -772,8 +871,8 @@ export default function LogActivityModal() {
                 <IconSymbol name="pencil" size={20} color={Colors.stamp} />
               </View>
               <View style={styles.choiceButtonContent}>
-                <Text style={styles.choiceButtonTitle}>Edit existing rating</Text>
-                <Text style={styles.choiceButtonSubtitle}>Update your rating and review</Text>
+                <Text style={styles.choiceButtonTitle}>Edit your rating</Text>
+                <Text style={styles.choiceButtonSubtitle}>Update your rating or review</Text>
               </View>
               <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />
             </Pressable>
@@ -784,19 +883,72 @@ export default function LogActivityModal() {
                 styles.choiceButton,
                 pressed && styles.choiceButtonPressed,
               ]}
-              onPress={() => {
-                setSelectedStatus('in_progress');
-                setStep('in_progress');
-              }}
+              onPress={() => handleStatusSelect('in_progress')}
             >
               <View style={styles.choiceButtonIcon}>
                 <IconSymbol name="play.circle" size={20} color={Colors.textMuted} />
               </View>
               <View style={styles.choiceButtonContent}>
                 <Text style={styles.choiceButtonTitle}>Log in-progress activity</Text>
-                <Text style={styles.choiceButtonSubtitle}>Track a rewatch in progress</Text>
+                <Text style={styles.choiceButtonSubtitle}>Track your current viewing</Text>
               </View>
               <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* Watch Conflict Step (replaces modal) */}
+        {step === 'watch_conflict' && activeWatch && (
+          <View style={styles.watchConflictSection}>
+            <Text style={styles.stepTitle}>Watch #{activeWatch.watch_number} In Progress</Text>
+
+            <WatchContextHeader
+              watchNumber={activeWatch.watch_number}
+              progress={activeWatchProgress}
+              progressText={latestProgressText}
+              contentType={contentType || 'movie'}
+            />
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.conflictButton,
+                styles.conflictButtonPrimary,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleContinueCurrentWatch}
+            >
+              <View style={styles.conflictButtonIcon}>
+                <IconSymbol name="play.circle.fill" size={24} color={Colors.white} />
+              </View>
+              <View style={styles.conflictButtonContent}>
+                <Text style={styles.conflictButtonTitlePrimary}>
+                  Continue Watch #{activeWatch.watch_number}
+                </Text>
+                <Text style={styles.conflictButtonSubtitlePrimary}>
+                  Update your progress
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.conflictButton,
+                styles.conflictButtonSecondary,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleStartRewatch}
+            >
+              <View style={styles.conflictButtonIcon}>
+                <IconSymbol name="arrow.counterclockwise" size={24} color={Colors.text} />
+              </View>
+              <View style={styles.conflictButtonContent}>
+                <Text style={styles.conflictButtonTitleSecondary}>
+                  Abandon & Start Watch #{activeWatch.watch_number + 1}
+                </Text>
+                <Text style={styles.conflictButtonSubtitleSecondary}>
+                  Start fresh from beginning
+                </Text>
+              </View>
             </Pressable>
           </View>
         )}
@@ -804,7 +956,21 @@ export default function LogActivityModal() {
         {/* Step 1: Status Selection */}
         {step === 'status' && (
           <View style={styles.statusSelection}>
-            <Text style={styles.stepTitle}>How did you watch this?</Text>
+            <Text style={styles.stepTitle}>
+              {activeWatch
+                ? `Continue Watch #${activeWatch.watch_number}`
+                : `Start Watch #${nextWatchNumber}`}
+            </Text>
+
+            {/* Show watch context if there's an active watch */}
+            {activeWatch && activeWatchProgress > 0 && (
+              <WatchContextHeader
+                watchNumber={activeWatch.watch_number}
+                progress={activeWatchProgress}
+                progressText={latestProgressText}
+                contentType={contentType || 'movie'}
+              />
+            )}
 
             <Pressable
               style={({ pressed }) => [
@@ -847,6 +1013,13 @@ export default function LogActivityModal() {
         {/* Step 2A: Completed Form */}
         {step === 'completed' && (
           <View style={styles.formSection}>
+            {/* Form Header */}
+            <View style={styles.formHeader}>
+              <Text style={styles.formHeaderText}>
+                {existingCompleted ? 'Edit Your Rating' : `Completing Watch #${activeWatch?.watch_number || nextWatchNumber}`}
+              </Text>
+            </View>
+
             {/* Star Rating */}
             <View style={styles.ratingSection}>
               <Text style={styles.sectionLabel}>RATING</Text>
@@ -997,6 +1170,14 @@ export default function LogActivityModal() {
         {/* Step 2B: In Progress Form */}
         {step === 'in_progress' && (
           <View style={styles.formSection}>
+            {/* Form Header */}
+            <View style={styles.formHeader}>
+              <Text style={styles.formHeaderText}>
+                Watch #{activeWatch?.watch_number || nextWatchNumber}
+                {activeWatchProgress > 0 && `  •  Currently at ${activeWatchProgress}%`}
+              </Text>
+            </View>
+
             {/* Progress - Movie (minutes) */}
             {contentType === 'movie' && (
               <View style={styles.progressSection}>
@@ -1148,55 +1329,6 @@ export default function LogActivityModal() {
           </View>
         )}
       </ScrollView>
-
-      {/* Rewatch Confirmation Modal */}
-      <Modal
-        visible={showRewatchConfirm}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowRewatchConfirm(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Unfinished Watch</Text>
-            <Text style={styles.modalMessage}>
-              You have an unfinished watch at {activeWatchProgress}%. What would you like to do?
-            </Text>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalButton,
-                styles.modalButtonPrimary,
-                pressed && styles.buttonPressed,
-              ]}
-              onPress={handleContinueCurrentWatch}
-            >
-              <Text style={styles.modalButtonTextPrimary}>Continue Watch #{activeWatch?.watch_number}</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalButton,
-                styles.modalButtonSecondary,
-                pressed && styles.buttonPressed,
-              ]}
-              onPress={handleStartRewatch}
-            >
-              <Text style={styles.modalButtonTextSecondary}>Start New Rewatch</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalButton,
-                pressed && styles.buttonPressed,
-              ]}
-              onPress={() => setShowRewatchConfirm(false)}
-            >
-              <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1320,6 +1452,81 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: 'italic',
     marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  watchStatusSection: {
+    marginBottom: Spacing.md,
+  },
+  watchCompleteInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.cardBackground,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  watchCompleteText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
+  },
+  watchConflictSection: {
+    gap: Spacing.lg,
+  },
+  conflictButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  conflictButtonPrimary: {
+    backgroundColor: Colors.stamp,
+  },
+  conflictButtonSecondary: {
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  conflictButtonIcon: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  conflictButtonContent: {
+    flex: 1,
+  },
+  conflictButtonTitlePrimary: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.white,
+    marginBottom: 2,
+  },
+  conflictButtonSubtitlePrimary: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.white,
+    opacity: 0.8,
+  },
+  conflictButtonTitleSecondary: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  conflictButtonSubtitleSecondary: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  formHeader: {
+    marginBottom: Spacing.md,
+  },
+  formHeaderText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
     textAlign: 'center',
   },
   choiceButton: {
@@ -1587,63 +1794,5 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.xs,
     color: Colors.text,
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Spacing.xl,
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    width: '100%',
-    maxWidth: 340,
-  },
-  modalTitle: {
-    fontFamily: Fonts.serifSemiBold,
-    fontSize: FontSizes.xl,
-    color: Colors.text,
-    textAlign: 'center',
-    marginBottom: Spacing.md,
-  },
-  modalMessage: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    marginBottom: Spacing.xl,
-  },
-  modalButton: {
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.sm,
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  modalButtonPrimary: {
-    backgroundColor: Colors.stamp,
-  },
-  modalButtonSecondary: {
-    backgroundColor: Colors.cardBackground,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  modalButtonTextPrimary: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.md,
-    color: Colors.white,
-  },
-  modalButtonTextSecondary: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-  },
-  modalButtonTextCancel: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
   },
 });
