@@ -129,17 +129,19 @@ export default function CurrentlyWatchingScreen() {
                   <Text style={styles.title} numberOfLines={2}>
                     {activity.content?.title || 'Unknown'}
                   </Text>
-                  <View style={styles.metaRow}>
-                    {activity.watch && (
+                  {activity.watch && (
+                    <View style={styles.metaRow}>
                       <View style={styles.watchBadge}>
                         <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
                       </View>
-                    )}
-                    <Text style={styles.meta}>
-                      {formatProgress(activity) || 'In Progress'}
-                    </Text>
-                  </View>
+                    </View>
+                  )}
                 </View>
+
+                {/* Progress on right */}
+                <Text style={styles.progressText}>
+                  {formatProgress(activity) || 'In Progress'}
+                </Text>
 
                 <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
               </Pressable>
@@ -236,10 +238,11 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 2,
   },
-  meta: {
-    fontFamily: Fonts.sans,
+  progressText: {
+    fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
+    marginRight: Spacing.sm,
   },
   metaRow: {
     flexDirection: 'row',

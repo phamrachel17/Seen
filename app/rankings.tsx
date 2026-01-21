@@ -14,7 +14,7 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, Ranking } from '@/types';
+import { Movie, Ranking, ContentType } from '@/types';
 
 interface RankedMovie extends Movie {
   ranking: Ranking;
@@ -54,12 +54,13 @@ export default function RankingsScreen() {
   const [rankings, setRankings] = useState<RankedMovie[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ContentType>('movie');
 
   const loadRankings = useCallback(async () => {
     if (!targetUserId) return;
 
     try {
-      // Fetch rankings with movies
+      // Fetch rankings with movies, filtered by content_type
       const { data: rankingsData, error: rankingsError } = await supabase
         .from('rankings')
         .select(`
@@ -67,6 +68,7 @@ export default function RankingsScreen() {
           movies (*)
         `)
         .eq('user_id', targetUserId)
+        .eq('content_type', activeTab)
         .order('rank_position', { ascending: true });
 
       if (rankingsError) {
@@ -135,14 +137,14 @@ export default function RankingsScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [targetUserId]);
+  }, [targetUserId, activeTab]);
 
   useFocusEffect(
     useCallback(() => {
       if (targetUserId) {
         loadRankings();
       }
-    }, [targetUserId, loadRankings])
+    }, [targetUserId, loadRankings, activeTab])
   );
 
   const onRefresh = async () => {
@@ -151,8 +153,8 @@ export default function RankingsScreen() {
     setIsRefreshing(false);
   };
 
-  const navigateToMovie = (movieId: number) => {
-    router.push(`/title/${movieId}?type=movie` as any);
+  const navigateToContent = (tmdbId: number) => {
+    router.push(`/title/${tmdbId}?type=${activeTab}` as any);
   };
 
   return (
@@ -164,6 +166,26 @@ export default function RankingsScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>{isOwnRankings ? 'My Rankings' : 'Their Rankings'}</Text>
         <View style={styles.headerSpacer} />
+      </View>
+
+      {/* Content Type Toggle */}
+      <View style={styles.toggleContainer}>
+        <Pressable
+          style={[styles.toggleTab, activeTab === 'movie' && styles.toggleTabActive]}
+          onPress={() => setActiveTab('movie')}
+        >
+          <Text style={[styles.toggleText, activeTab === 'movie' && styles.toggleTextActive]}>
+            Movies
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toggleTab, activeTab === 'tv' && styles.toggleTabActive]}
+          onPress={() => setActiveTab('tv')}
+        >
+          <Text style={[styles.toggleText, activeTab === 'tv' && styles.toggleTextActive]}>
+            TV Shows
+          </Text>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -183,15 +205,15 @@ export default function RankingsScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
               {isOwnRankings
-                ? 'No ranked films yet. Start reviewing movies to build your list.'
-                : 'No ranked films yet.'}
+                ? `No ranked ${activeTab === 'movie' ? 'movies' : 'TV shows'} yet. Start reviewing to build your list.`
+                : `No ranked ${activeTab === 'movie' ? 'movies' : 'TV shows'} yet.`}
             </Text>
             {isOwnRankings && (
               <Pressable
                 style={styles.discoverButton}
                 onPress={() => router.push('/(tabs)/discover')}
               >
-                <Text style={styles.discoverButtonText}>Discover Films</Text>
+                <Text style={styles.discoverButtonText}>Discover {activeTab === 'movie' ? 'Movies' : 'TV Shows'}</Text>
               </Pressable>
             )}
           </View>
@@ -204,7 +226,7 @@ export default function RankingsScreen() {
                   styles.rankItem,
                   pressed && styles.itemPressed,
                 ]}
-                onPress={() => navigateToMovie(movie.id)}
+                onPress={() => navigateToContent(movie.id)}
               >
                 {/* Rank Number */}
                 <View style={styles.rankNumberContainer}>
@@ -287,6 +309,31 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    marginHorizontal: Spacing.lg,
+    marginVertical: Spacing.md,
+    backgroundColor: Colors.dust,
+    borderRadius: BorderRadius.md,
+    padding: 4,
+  },
+  toggleTab: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    borderRadius: BorderRadius.sm,
+  },
+  toggleTabActive: {
+    backgroundColor: Colors.cardBackground,
+  },
+  toggleText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  toggleTextActive: {
+    color: Colors.text,
   },
   scrollView: {
     flex: 1,

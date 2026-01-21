@@ -43,6 +43,7 @@ export interface CrewMember {
 export interface MovieDetails extends Movie {
   cast: CastMember[];
   crew: CrewMember[];
+  imdb_id?: string;
 }
 
 // ============================================
@@ -91,6 +92,7 @@ export interface TVShowDetails extends TVShow {
   cast: CastMember[];
   crew: CrewMember[];
   seasons: Season[];
+  imdb_id?: string;
 }
 
 // ============================================
@@ -194,6 +196,8 @@ export interface Ranking {
   id: string;
   user_id: string;
   movie_id: number;
+  content_id?: number;
+  content_type: ContentType;
   rank_position: number;
   elo_score: number;
   created_at: string;
@@ -275,4 +279,16 @@ export interface WatchHistoryEntry {
   movie_id: number;
   watched_at: string; // ISO date string (YYYY-MM-DD)
   created_at: string;
+}
+
+// External ratings from OMDb API (IMDb, Rotten Tomatoes)
+export interface ExternalRatings {
+  imdb?: {
+    rating: string;   // "8.5"
+    votes: string;    // "1,234,567"
+  };
+  rottenTomatoes?: {
+    score: string;    // "92%"
+  };
+  metascore?: string; // "85"
 }

@@ -14,6 +14,7 @@ import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ActivityFeedCard } from '@/components/activity-feed-card';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 import { getUnreadNotificationCount } from '@/lib/social';
 import { getFeedActivities } from '@/lib/activity';
 import { getFollowingIds } from '@/lib/follows';
@@ -29,6 +30,7 @@ export default function FeedScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [displayName, setDisplayName] = useState<string>('');
 
   const loadFeed = useCallback(async () => {
     if (!user) {
@@ -37,6 +39,19 @@ export default function FeedScreen() {
     }
 
     try {
+      // Fetch user profile for display name
+      const { data: profile } = await supabase
+        .from('users')
+        .select('display_name, username')
+        .eq('id', user.id)
+        .single();
+
+      if (profile) {
+        const name = profile.display_name || profile.username || 'there';
+        // Get first name only for a friendlier greeting
+        setDisplayName(name.split(' ')[0]);
+      }
+
       // Get users the current user is following
       const followingIds = await getFollowingIds(user.id);
 
@@ -79,10 +94,6 @@ export default function FeedScreen() {
     <ActivityFeedCard activity={item} refreshKey={refreshKey} />
   );
 
-  const renderHeader = () => (
-    <Text style={styles.sectionTitle}>Your Feed</Text>
-  );
-
   const renderEmpty = () => {
     if (isLoading) return null;
 
@@ -107,17 +118,25 @@ export default function FeedScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Text style={styles.title}>Seen</Text>
-        <Pressable style={styles.iconButton} onPress={navigateToNotifications}>
-          <IconSymbol name="bell" size={22} color={Colors.text} />
-          {unreadCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </Text>
-            </View>
-          )}
-        </Pressable>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.title}>Seen</Text>
+          <Text style={styles.feedLabel}>YOUR FEED</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <Pressable style={styles.iconButton} onPress={navigateToNotifications}>
+            <IconSymbol name="bell" size={22} color={Colors.text} />
+            {unreadCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+          <Text style={styles.welcomeText}>
+            Welcome back{displayName ? `, ${displayName}` : ''}
+          </Text>
+        </View>
       </View>
 
       {isLoading ? (
@@ -129,7 +148,6 @@ export default function FeedScreen() {
           data={activities}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -156,14 +174,34 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
+  },
+  headerTextContainer: {
+    flex: 1,
   },
   title: {
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
+  },
+  welcomeText: {
+    fontFamily: Fonts.serif,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    marginTop: Spacing.xs,
+  },
+  feedLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    marginTop: Spacing.xs,
+  },
+  headerRight: {
+    alignItems: 'flex-end',
+    gap: Spacing.xs,
   },
   iconButton: {
     padding: Spacing.xs,
@@ -194,12 +232,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing['3xl'],
-  },
-  sectionTitle: {
-    fontFamily: Fonts.serifItalic,
-    fontSize: FontSizes['2xl'],
-    color: Colors.text,
-    marginBottom: Spacing.lg,
   },
   separator: {
     height: Spacing.md,

@@ -18,14 +18,10 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
-import { Movie, Review, User } from '@/types';
-
-interface ReviewWithMovie extends Review {
-  movies: Movie;
-}
+import { Movie, User, Activity } from '@/types';
 
 interface UserStats {
-  totalFilms: number;
+  totalTitles: number;
   totalMinutes: number;
   rankingsCount: number;
 }
@@ -36,11 +32,11 @@ export default function ProfileScreen() {
   const { user } = useAuth();
 
   const [stats, setStats] = useState<UserStats>({
-    totalFilms: 0,
+    totalTitles: 0,
     totalMinutes: 0,
     rankingsCount: 0,
   });
-  const [recentReviews, setRecentReviews] = useState<ReviewWithMovie[]>([]);
+  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
@@ -121,7 +117,7 @@ export default function ProfileScreen() {
 
         setStats((prev) => ({
           ...prev,
-          totalFilms: uniqueContentMap.size,
+          totalTitles: uniqueContentMap.size,
           totalMinutes,
         }));
       }
@@ -161,22 +157,23 @@ export default function ProfileScreen() {
 
       setCurrentlyWatchingCount(activeInProgress.length);
 
-      // Load recent reviews
-      const { data: recentData, error: recentError } = await supabase
-        .from('reviews')
+      // Load recent activities (completed with reviews)
+      const { data: activityData, error: activityError } = await supabase
+        .from('activity_log')
         .select(`
           *,
-          movies (*)
+          content (*)
         `)
         .eq('user_id', user.id)
+        .eq('status', 'completed')
         .order('created_at', { ascending: false })
         .limit(6);
 
-      if (!recentError && recentData) {
-        const reviewsWithMovies = recentData.filter(
-          (item: ReviewWithMovie) => item.movies
-        ) as ReviewWithMovie[];
-        setRecentReviews(reviewsWithMovies);
+      if (!activityError && activityData) {
+        const activitiesWithContent = activityData.filter(
+          (item: Activity) => item.content
+        ) as Activity[];
+        setRecentActivities(activitiesWithContent);
       }
 
       // Load follow counts and ranking position
@@ -206,14 +203,14 @@ export default function ProfileScreen() {
   const formatWatchTime = (minutes: number) => {
     const days = Math.floor(minutes / (24 * 60));
     const hours = Math.floor((minutes % (24 * 60)) / 60);
+    const mins = minutes % 60;
     if (days > 0) {
       return `${days}d ${hours}h`;
     }
+    if (mins > 0) {
+      return `${hours}h ${mins}m`;
+    }
     return `${hours}h`;
-  };
-
-  const navigateToMovie = (movieId: number) => {
-    router.push(`/title/${movieId}?type=movie` as any);
   };
 
   return (
@@ -313,8 +310,8 @@ export default function ProfileScreen() {
         {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>{stats.totalFilms}</Text>
-            <Text style={styles.statLabel}>FILMS</Text>
+            <Text style={styles.statNumber}>{stats.totalTitles}</Text>
+            <Text style={styles.statLabel}>TITLES</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
@@ -355,55 +352,57 @@ export default function ProfileScreen() {
           />
         </View>
 
-        {/* Recent Archives */}
+        {/* Recent Activity */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
-            {recentReviews.length > 0 && (
+            {recentActivities.length > 0 && (
               <Pressable onPress={() => router.push('/(tabs)')}>
                 <Text style={styles.viewAll}>VIEW ALL</Text>
               </Pressable>
             )}
           </View>
 
-          {recentReviews.length > 0 ? (
+          {recentActivities.length > 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.recentScroll}
             >
-              {recentReviews.map((review) => (
+              {recentActivities.map((activity) => (
                 <Pressable
-                  key={review.id}
+                  key={activity.id}
                   style={({ pressed }) => [
                     styles.recentCard,
                     pressed && styles.cardPressed,
                   ]}
-                  onPress={() => navigateToMovie(review.movie_id)}
+                  onPress={() => router.push(`/title/${activity.content?.tmdb_id}?type=${activity.content?.content_type}` as any)}
                 >
-                  {review.movies.poster_url ? (
+                  {activity.content?.poster_url ? (
                     <Image
-                      source={{ uri: review.movies.poster_url }}
+                      source={{ uri: activity.content.poster_url }}
                       style={styles.recentPoster}
                       contentFit="cover"
                     />
                   ) : (
                     <View style={[styles.recentPoster, styles.posterPlaceholder]}>
                       <Text style={styles.placeholderLetter}>
-                        {review.movies.title[0]}
+                        {activity.content?.title?.[0] || '?'}
                       </Text>
                     </View>
                   )}
-                  <View style={styles.recentStars}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <IconSymbol
-                        key={star}
-                        name={star <= review.star_rating ? 'star.fill' : 'star'}
-                        size={10}
-                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
-                      />
-                    ))}
-                  </View>
+                  {activity.star_rating && (
+                    <View style={styles.recentStars}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <IconSymbol
+                          key={star}
+                          name={star <= activity.star_rating! ? 'star.fill' : 'star'}
+                          size={10}
+                          color={star <= activity.star_rating! ? Colors.starFilled : Colors.starEmpty}
+                        />
+                      ))}
+                    </View>
+                  )}
                 </Pressable>
               ))}
             </ScrollView>

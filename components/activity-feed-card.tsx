@@ -127,16 +127,6 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const getActivityLabel = (): string => {
-    if (isCompleted) {
-      return 'Ranked';
-    }
-    if (isInProgress) {
-      return 'Logged Progress';
-    }
-    return '';
-  };
-
   const renderStars = (rating: number) => {
     return (
       <View style={styles.starsContainer}>
@@ -157,7 +147,7 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
       style={({ pressed }) => [styles.container, pressed && styles.pressed]}
       onPress={handleCardPress}
     >
-      {/* User Header */}
+      {/* User Header - Action First */}
       <View style={styles.userHeader}>
         <Pressable style={styles.userInfo} onPress={handleUserPress}>
           <ProfileAvatar
@@ -167,15 +157,16 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
             variant="circle"
           />
           <View style={styles.userTextContainer}>
-            <Text style={styles.displayName} numberOfLines={1}>
-              {activityUser.display_name || activityUser.username}
+            <Text style={styles.actionHeadline} numberOfLines={1}>
+              <Text style={styles.displayName}>
+                {activityUser.display_name || activityUser.username}
+              </Text>
+              {' '}
+              <Text style={styles.actionVerb}>
+                {isCompleted ? 'ranked' : 'is watching'}
+              </Text>
             </Text>
-            <View style={styles.timestampRow}>
-              <Text style={styles.timestamp}>{formatDate(activity.created_at)}</Text>
-              {getActivityLabel() && (
-                <Text style={styles.activityLabel}>· {getActivityLabel()}</Text>
-              )}
-            </View>
+            <Text style={styles.timestamp}>{formatDate(activity.created_at)}</Text>
           </View>
         </Pressable>
       </View>
@@ -211,7 +202,7 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
             </View>
           )}
 
-          {/* In Progress: Show progress */}
+          {/* In Progress: Show status indicator */}
           {isInProgress && (
             <View style={styles.progressRow}>
               <IconSymbol name="play.circle.fill" size={14} color={Colors.textMuted} />
@@ -220,9 +211,6 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
                   <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
                 </View>
               )}
-              <Text style={styles.progressText}>
-                {formatProgress(activity) || 'In Progress'}
-              </Text>
             </View>
           )}
 
@@ -238,6 +226,15 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
             </Text>
           )}
         </View>
+
+        {/* In Progress: Progress on right side */}
+        {isInProgress && (
+          <View style={styles.progressRight}>
+            <Text style={styles.progressText}>
+              {formatProgress(activity) || 'In Progress'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Watched With */}
@@ -330,25 +327,26 @@ const styles = StyleSheet.create({
   userTextContainer: {
     flex: 1,
   },
+  actionHeadline: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
   displayName: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
     color: Colors.text,
   },
-  timestampRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
+  actionVerb: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
   },
   timestamp: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
+    fontSize: FontSizes.sm,
     color: Colors.textMuted,
-  },
-  activityLabel: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
+    marginTop: 2,
   },
   contentRow: {
     flexDirection: 'row',
@@ -394,10 +392,16 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     marginBottom: Spacing.sm,
   },
+  progressRight: {
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: Spacing.xs,
+  },
   progressText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
+    textAlign: 'right',
   },
   reviewText: {
     fontFamily: Fonts.sans,

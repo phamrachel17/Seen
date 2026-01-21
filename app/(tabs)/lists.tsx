@@ -15,14 +15,14 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
-import { Movie, Ranking, Bookmark, Activity } from '@/types';
+import { Movie, Ranking, Activity, Content } from '@/types';
 
 interface RankedMovie extends Movie {
   ranking: Ranking;
 }
 
-interface BookmarkedMovie extends Movie {
-  bookmark: Bookmark;
+interface BookmarkedMovie extends Content {
+  bookmarked_at: string;
 }
 
 export default function ListsScreen() {
@@ -57,8 +57,8 @@ export default function ListsScreen() {
     const { data, error } = await supabase
       .from('bookmarks')
       .select(`
-        *,
-        movies (*)
+        created_at,
+        content:content_id (*)
       `)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -69,15 +69,10 @@ export default function ListsScreen() {
     }
 
     const bookmarkedMovies: BookmarkedMovie[] = (data || [])
-      .filter((item: { movies: Movie | null }) => item.movies)
-      .map((item: { movies: Movie } & Bookmark) => ({
-        ...item.movies,
-        bookmark: {
-          id: item.id,
-          user_id: item.user_id,
-          movie_id: item.movie_id,
-          created_at: item.created_at,
-        },
+      .filter((item: any) => item.content)
+      .map((item: any) => ({
+        ...item.content,
+        bookmarked_at: item.created_at,
       }));
 
     setWatchlist(bookmarkedMovies);
@@ -203,7 +198,7 @@ export default function ListsScreen() {
                   styles.watchlistCard,
                   pressed && styles.cardPressed,
                 ]}
-                onPress={() => navigateToMovie(movie.id)}
+                onPress={() => navigateToContent(movie.tmdb_id, movie.content_type || 'movie')}
               >
                 {movie.poster_url ? (
                   <Image

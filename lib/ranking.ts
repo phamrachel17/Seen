@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Movie, Ranking, Review } from '@/types';
+import { Movie, Ranking, Review, ContentType } from '@/types';
 import { ensureContentExists } from './content';
 import { createActivity } from './activity';
 
@@ -108,9 +108,13 @@ function sortByRelevance(candidates: RankedMovie[], newMovie: Movie): RankedMovi
 
 /**
  * Get user's rankings with star ratings from reviews
+ * Filtered by content type (movie or tv)
  */
-export async function getUserRankingsWithRatings(userId: string): Promise<RankedMovie[]> {
-  // Fetch rankings with movies
+export async function getUserRankingsWithRatings(
+  userId: string,
+  contentType: ContentType = 'movie'
+): Promise<RankedMovie[]> {
+  // Fetch rankings with movies, filtered by content_type
   const { data: rankingsData, error: rankingsError } = await supabase
     .from('rankings')
     .select(`
@@ -118,6 +122,7 @@ export async function getUserRankingsWithRatings(userId: string): Promise<Ranked
       movies (*)
     `)
     .eq('user_id', userId)
+    .eq('content_type', contentType)
     .order('rank_position', { ascending: true });
 
   if (rankingsError) {
@@ -177,6 +182,8 @@ export async function getUserRankingsWithRatings(userId: string): Promise<Ranked
         id: item.id,
         user_id: item.user_id,
         movie_id: item.movie_id,
+        content_id: item.content_id,
+        content_type: item.content_type,
         rank_position: item.rank_position,
         elo_score: item.elo_score,
         created_at: item.created_at,
@@ -293,12 +300,14 @@ export function processComparison(state: RankingState, prefersNewMovie: boolean)
  * (count of movies in higher star tiers) + (position within current tier)
  *
  * This ensures 5-star movies always rank above 4-star, etc.
+ * Rankings are now separated by content_type (movie vs tv)
  */
 export async function saveRanking(
   userId: string,
   movie: Movie,
   tierPosition: number,
-  starRating: number
+  starRating: number,
+  contentType: ContentType = 'movie'
 ): Promise<void> {
   try {
     // Cache the movie with all attributes
@@ -322,21 +331,22 @@ export async function saveRanking(
       console.error('Error caching movie:', movieError);
     }
 
-    // Check if movie already has a ranking
+    // Check if movie already has a ranking for this content type
     const { data: existingRanking } = await supabase
       .from('rankings')
       .select('id, rank_position')
       .eq('user_id', userId)
       .eq('movie_id', movie.id)
+      .eq('content_type', contentType)
       .single();
 
     if (existingRanking) {
-      console.log('Movie already ranked at position:', existingRanking.rank_position);
+      console.log('Content already ranked at position:', existingRanking.rank_position);
       return;
     }
 
-    // Get all rankings with their star ratings to calculate global position
-    const allRankings = await getUserRankingsWithRatings(userId);
+    // Get all rankings for this content type with their star ratings
+    const allRankings = await getUserRankingsWithRatings(userId, contentType);
 
     // Count movies in HIGHER star rating tiers (they come before this movie)
     const moviesInHigherTiers = allRankings.filter(m => m.star_rating > starRating).length;
@@ -344,11 +354,12 @@ export async function saveRanking(
     // Global position = higher tier count + position within tier
     const globalPosition = moviesInHigherTiers + tierPosition;
 
-    // Shift existing rankings down to make room
+    // Shift existing rankings down to make room (only within same content_type)
     const { data: toShift } = await supabase
       .from('rankings')
       .select('id, rank_position')
       .eq('user_id', userId)
+      .eq('content_type', contentType)
       .gte('rank_position', globalPosition)
       .order('rank_position', { ascending: false });
 
@@ -360,10 +371,11 @@ export async function saveRanking(
         .eq('id', ranking.id);
     }
 
-    // Insert the new ranking
+    // Insert the new ranking with content_type
     const { error: insertError } = await supabase.from('rankings').insert({
       user_id: userId,
       movie_id: movie.id,
+      content_type: contentType,
       rank_position: globalPosition,
       elo_score: 1500,
     });
@@ -373,7 +385,7 @@ export async function saveRanking(
       throw insertError;
     }
 
-    console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition}`);
+    console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition} (${contentType})`);
 
     // Ensure content exists and create completed activity
     try {
@@ -427,14 +439,20 @@ export async function saveRanking(
 
 /**
  * Remove a ranking and shift positions to close gap
+ * Only shifts rankings within the same content_type
  */
-export async function removeRanking(userId: string, movieId: number): Promise<void> {
+export async function removeRanking(
+  userId: string,
+  movieId: number,
+  contentType: ContentType = 'movie'
+): Promise<void> {
   // Get the ranking to delete
   const { data: toDelete } = await supabase
     .from('rankings')
-    .select('id, rank_position')
+    .select('id, rank_position, content_type')
     .eq('user_id', userId)
     .eq('movie_id', movieId)
+    .eq('content_type', contentType)
     .single();
 
   if (!toDelete) return;
@@ -447,11 +465,12 @@ export async function removeRanking(userId: string, movieId: number): Promise<vo
     .delete()
     .eq('id', toDelete.id);
 
-  // Shift rankings above the deleted position up
+  // Shift rankings above the deleted position up (only within same content_type)
   const { data: toShift } = await supabase
     .from('rankings')
     .select('id, rank_position')
     .eq('user_id', userId)
+    .eq('content_type', contentType)
     .gt('rank_position', deletedPosition)
     .order('rank_position', { ascending: true });
 

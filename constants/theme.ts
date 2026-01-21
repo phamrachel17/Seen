@@ -42,17 +42,17 @@ export const Colors = {
 
 /**
  * Typography - Custom Fonts
- * Playfair Display: Elegant serif for titles/headings
+ * Libre Baskerville: Elegant serif for titles/headings
  * Inter: Clean sans-serif for body text
  */
 export const Fonts = {
-  // Serif - Playfair Display (for titles, headings)
-  serif: 'PlayfairDisplay_400Regular',
-  serifMedium: 'PlayfairDisplay_500Medium',
-  serifSemiBold: 'PlayfairDisplay_600SemiBold',
-  serifBold: 'PlayfairDisplay_700Bold',
-  serifItalic: 'PlayfairDisplay_400Regular_Italic',
-  serifBoldItalic: 'PlayfairDisplay_700Bold_Italic',
+  // Display - Libre Baskerville (for titles, headings)
+  serif: 'LibreBaskerville_400Regular',
+  serifMedium: 'LibreBaskerville_400Regular',
+  serifSemiBold: 'LibreBaskerville_700Bold',
+  serifBold: 'LibreBaskerville_700Bold',
+  serifItalic: 'LibreBaskerville_400Regular_Italic',
+  serifBoldItalic: 'LibreBaskerville_700Bold',
 
   // Sans - Inter (for body, labels)
   sans: 'Inter_400Regular',

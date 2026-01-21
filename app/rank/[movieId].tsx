@@ -24,7 +24,7 @@ import {
   RankedMovie,
 } from '@/lib/ranking';
 import { useAuth } from '@/lib/auth-context';
-import { Movie } from '@/types';
+import { Movie, ContentType } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.lg) / 2;
@@ -51,9 +51,10 @@ function StarRating({ rating, size = 12 }: { rating: number; size?: number }) {
 }
 
 export default function RankingModal() {
-  const { movieId, starRating: starRatingParam } = useLocalSearchParams<{
+  const { movieId, starRating: starRatingParam, contentType: contentTypeParam } = useLocalSearchParams<{
     movieId: string;
     starRating?: string;
+    contentType?: ContentType;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -64,25 +65,28 @@ export default function RankingModal() {
   const [rankingState, setRankingState] = useState<RankingState | null>(null);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [starRating, setStarRating] = useState<number>(3);
+  const [contentType, setContentType] = useState<ContentType>('movie');
 
   useEffect(() => {
     if (movieId && user) {
       const rating = starRatingParam ? parseInt(starRatingParam, 10) : 3;
+      const type = contentTypeParam || 'movie';
       setStarRating(rating);
-      initializeRanking(parseInt(movieId, 10), rating);
+      setContentType(type);
+      initializeRanking(parseInt(movieId, 10), rating, type);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movieId, user, starRatingParam]);
+  }, [movieId, user, starRatingParam, contentTypeParam]);
 
-  const initializeRanking = async (id: number, rating: number) => {
+  const initializeRanking = async (id: number, rating: number, type: ContentType) => {
     try {
       setIsLoading(true);
 
       // Fetch the movie to rank
       const movie = await getMovieDetails(id);
 
-      // Fetch user's existing rankings with star ratings
-      const existingRankings = await getUserRankingsWithRatings(user!.id);
+      // Fetch user's existing rankings with star ratings for this content type
+      const existingRankings = await getUserRankingsWithRatings(user!.id, type);
 
       // Initialize ranking state with tier awareness
       const state = initializeRankingStateWithTier(movie, rating, existingRankings);
@@ -90,7 +94,7 @@ export default function RankingModal() {
 
       if (state.isComplete) {
         // No comparisons needed (first movie in tier)
-        await finishRanking(state, rating);
+        await finishRanking(state, rating, type);
       } else {
         // Get first comparison
         setComparison(getCurrentComparison(state));
@@ -109,17 +113,17 @@ export default function RankingModal() {
     setRankingState(newState);
 
     if (newState.isComplete) {
-      await finishRanking(newState, starRating);
+      await finishRanking(newState, starRating, contentType);
     } else {
       setComparison(getCurrentComparison(newState));
     }
   };
 
-  const finishRanking = async (state: RankingState, rating: number) => {
+  const finishRanking = async (state: RankingState, rating: number, type: ContentType) => {
     setIsSaving(true);
 
     try {
-      await saveRanking(user!.id, state.newMovie, state.tierPosition, rating);
+      await saveRanking(user!.id, state.newMovie, state.tierPosition, rating, type);
       // Navigate to lists quickly
       setTimeout(() => {
         router.replace('/(tabs)/lists');

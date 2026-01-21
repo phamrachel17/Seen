@@ -183,8 +183,8 @@ export default function ReviewModal() {
         // Check if star rating changed - need to re-rank
         if (originalStarRating !== null && starRating !== originalStarRating) {
           // Delete existing ranking first, then trigger ranking flow
-          await removeRanking(user.id, movie.id);
-          router.replace(`/rank/${movie.id}?starRating=${starRating}`);
+          await removeRanking(user.id, movie.id, 'movie');
+          router.replace(`/rank/${movie.id}?starRating=${starRating}&contentType=movie`);
         } else {
           // No rating change, just go back
           router.back();
@@ -216,7 +216,7 @@ export default function ReviewModal() {
         await addWatchDate(user.id, movie.id, new Date());
 
         // Navigate to ranking flow with star rating for tier-based ranking
-        router.replace(`/rank/${movie.id}?starRating=${starRating}`);
+        router.replace(`/rank/${movie.id}?starRating=${starRating}&contentType=movie`);
       }
     } catch (error) {
       console.error('Error saving review:', error);

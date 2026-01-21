@@ -41,6 +41,7 @@ interface TMDBMovie {
   runtime?: number;
   vote_average: number;
   belongs_to_collection?: TMDBCollection | null;
+  imdb_id?: string;
 }
 
 interface TMDBCastMember {
@@ -260,6 +261,7 @@ export async function getMovieDetails(movieId: number): Promise<MovieDetails> {
     ...transformMovie(movieData, director),
     cast,
     crew,
+    imdb_id: movieData.imdb_id,
   };
 }
 
@@ -373,12 +375,19 @@ export async function searchTVShows(query: string, page: number = 1): Promise<{
   };
 }
 
+// External IDs response type
+interface TMDBExternalIds {
+  imdb_id?: string;
+  tvdb_id?: number;
+}
+
 // Get TV show details by ID (includes seasons)
 export async function getTVShowDetails(showId: number): Promise<TVShowDetails> {
-  // Fetch show details and credits in parallel
-  const [showData, creditsData] = await Promise.all([
+  // Fetch show details, credits, and external IDs in parallel
+  const [showData, creditsData, externalIds] = await Promise.all([
     tmdbFetch<TMDBTVShow>(`/tv/${showId}`),
     tmdbFetch<TMDBCredits>(`/tv/${showId}/credits`),
+    tmdbFetch<TMDBExternalIds>(`/tv/${showId}/external_ids`),
   ]);
 
   // Find creator from created_by field
@@ -423,6 +432,7 @@ export async function getTVShowDetails(showId: number): Promise<TVShowDetails> {
     cast,
     crew,
     seasons,
+    imdb_id: externalIds.imdb_id,
   };
 }
 

@@ -20,6 +20,7 @@ import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
+import { getExternalRatings } from '@/lib/omdb';
 import { getContentByTmdbId, ensureContentExists } from '@/lib/content';
 import {
   getUserCompletedActivity,
@@ -41,6 +42,7 @@ import {
   ContentType,
   Ranking,
   Watch,
+  ExternalRatings,
 } from '@/types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -81,6 +83,9 @@ export default function TitleDetailScreen() {
     count: number;
   } | null>(null);
 
+  // External ratings (IMDb, RT)
+  const [externalRatings, setExternalRatings] = useState<ExternalRatings | null>(null);
+
   useEffect(() => {
     if (id) {
       loadContent(parseInt(id, 10), type || 'movie');
@@ -102,12 +107,21 @@ export default function TitleDetailScreen() {
       setIsLoading(true);
 
       // Load content details from TMDB
+      let imdbId: string | undefined;
       if (contentType === 'movie') {
         const details = await getMovieDetails(tmdbId);
         setMovieDetails(details);
+        imdbId = details.imdb_id;
       } else {
         const details = await getTVShowDetails(tmdbId);
         setTVDetails(details);
+        imdbId = details.imdb_id;
+      }
+
+      // Fetch external ratings (IMDb, RT) if we have an IMDB ID
+      if (imdbId) {
+        const ratings = await getExternalRatings(imdbId);
+        setExternalRatings(ratings);
       }
 
       // Ensure content exists in DB
@@ -137,12 +151,13 @@ export default function TitleDetailScreen() {
       // Load user's activities, bookmark, ranking, watch, and friends' activities in parallel
       const followingIds = await getFollowingIds(user.id);
 
+      const contentType = type || 'movie';
       const [completed, inProgress, watch, bookmark, ranking, friendsActs] = await Promise.all([
         getUserCompletedActivity(user.id, contentId),
         getUserInProgressActivity(user.id, contentId),
         getActiveWatch(user.id, contentId),
         checkBookmarkStatus(contentId),
-        loadUserRanking(tmdbId),
+        loadUserRanking(tmdbId, contentType),
         getFriendsActivitiesForContent(user.id, contentId, followingIds),
       ]);
 
@@ -169,12 +184,13 @@ export default function TitleDetailScreen() {
     return !!data;
   };
 
-  const loadUserRanking = async (tmdbId: number): Promise<Ranking | null> => {
+  const loadUserRanking = async (tmdbId: number, contentType: ContentType): Promise<Ranking | null> => {
     const { data } = await supabase
       .from('rankings')
       .select('*')
       .eq('user_id', user?.id)
       .eq('movie_id', tmdbId)
+      .eq('content_type', contentType)
       .single();
 
     return data;
@@ -369,7 +385,7 @@ export default function TitleDetailScreen() {
         )}
         <LinearGradient
           colors={['transparent', 'transparent', Colors.background]}
-          locations={[0, 0.5, 1]}
+          locations={[0, 0.6, 1]}
           style={styles.headerGradient}
         />
       </Animated.View>
@@ -492,6 +508,33 @@ export default function TitleDetailScreen() {
                   <Text style={styles.genreText}>{genre}</Text>
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* External Ratings (IMDb, RT) */}
+          {externalRatings && (externalRatings.imdb || externalRatings.rottenTomatoes) && (
+            <View style={styles.externalRatingsRow}>
+              {externalRatings.imdb && (
+                <View style={styles.externalRating}>
+                  <Image
+                    source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/IMDB_Logo_2016.svg/120px-IMDB_Logo_2016.svg.png' }}
+                    style={styles.imdbLogo}
+                    contentFit="contain"
+                  />
+                  <Text style={styles.ratingValue}>{externalRatings.imdb.rating}</Text>
+                  <Text style={styles.ratingMax}>/10</Text>
+                </View>
+              )}
+              {externalRatings.rottenTomatoes && (
+                <View style={styles.externalRating}>
+                  <Image
+                    source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Rotten_Tomatoes.svg/48px-Rotten_Tomatoes.svg.png' }}
+                    style={styles.rtLogo}
+                    contentFit="contain"
+                  />
+                  <Text style={styles.ratingValue}>{externalRatings.rottenTomatoes.score}</Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -901,6 +944,36 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textSecondary,
+  },
+  externalRatingsRow: {
+    flexDirection: 'row',
+    gap: Spacing.xl,
+    marginBottom: Spacing.lg,
+  },
+  externalRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  imdbLogo: {
+    width: 40,
+    height: 20,
+    marginRight: Spacing.xs,
+  },
+  rtLogo: {
+    width: 18,
+    height: 18,
+    marginRight: Spacing.xs,
+  },
+  ratingValue: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  ratingMax: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
   },
   synopsis: {
     fontFamily: Fonts.sans,
