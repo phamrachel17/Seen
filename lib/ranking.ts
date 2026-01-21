@@ -380,9 +380,23 @@ export async function saveRanking(
       // Ensure movie exists in content table and get content ID
       const content = await ensureContentExists(movie.id, 'movie');
 
-      if (content) {
+      if (!content) {
+        console.error('Failed to ensure content exists for movie:', movie.id);
+        throw new Error(`Content creation failed for TMDB ID ${movie.id}`);
+      }
+
+      // Check if activity already exists to avoid duplicates
+      const { data: existingActivity } = await supabase
+        .from('activity_log')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('content_id', content.id)
+        .eq('status', 'completed')
+        .single();
+
+      if (!existingActivity) {
         // Create completed activity with the star rating
-        await createActivity({
+        const activityResult = await createActivity({
           userId: userId,
           tmdbId: movie.id,
           contentType: 'movie',
@@ -392,11 +406,18 @@ export async function saveRanking(
           isPrivate: false,
         });
 
-        console.log('Created completed activity for ranking');
+        if (!activityResult) {
+          throw new Error('createActivity returned null/undefined');
+        }
+
+        console.log('Created completed activity for ranking:', activityResult.id);
+      } else {
+        console.log('Activity already exists for this ranking, skipping creation');
       }
     } catch (activityError) {
       console.error('Error creating activity for ranking:', activityError);
-      // Don't throw - ranking was saved successfully
+      // Throw error to surface data consistency issues
+      throw new Error(`Failed to create activity for ranking: ${activityError}`);
     }
   } catch (error) {
     console.error('Error in saveRanking:', error);
