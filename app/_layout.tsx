@@ -15,7 +15,13 @@ import {
   LibreBaskerville_700Bold,
   LibreBaskerville_400Regular_Italic,
 } from '@expo-google-fonts/libre-baskerville';
+import {
+  NanumMyeongjo_400Regular,
+  NanumMyeongjo_700Bold,
+  NanumMyeongjo_800ExtraBold,
+} from '@expo-google-fonts/nanum-myeongjo';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { Colors } from '@/constants/theme';
 import 'react-native-reanimated';
@@ -39,6 +45,34 @@ function RootLayoutNav() {
       router.replace('/(tabs)');
     }
   }, [session, loading, segments, router]);
+
+  // Handle deep links for email confirmation
+  useEffect(() => {
+    const handleDeepLink = (event: { url: string }) => {
+      const url = event.url;
+      if (url.includes('auth/confirm') || url.includes('token_hash')) {
+        const params = Linking.parse(url);
+        const tokenHash = params.queryParams?.token_hash as string | undefined;
+        const type = params.queryParams?.type as string | undefined;
+        if (tokenHash) {
+          router.push({
+            pathname: '/auth-confirm',
+            params: { token_hash: tokenHash, type: type || 'signup' },
+          });
+        }
+      }
+    };
+
+    // Handle deep links when app is already open
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Handle deep link that opened the app
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => subscription.remove();
+  }, [router]);
 
   if (loading) {
     return (
@@ -122,6 +156,34 @@ function RootLayoutNav() {
             animation: 'slide_from_right',
           }}
         />
+        <Stack.Screen
+          name="auth-confirm"
+          options={{
+            presentation: 'card',
+            animation: 'fade',
+          }}
+        />
+        <Stack.Screen
+          name="account"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="list/[id]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="create-list"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
       </Stack>
       <StatusBar style="dark" />
     </>
@@ -137,6 +199,9 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    NanumMyeongjo_400Regular,
+    NanumMyeongjo_700Bold,
+    NanumMyeongjo_800ExtraBold,
   });
 
   useEffect(() => {

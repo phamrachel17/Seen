@@ -45,6 +45,63 @@ const SCORE_WEIGHTS = {
 } as const;
 
 /**
+ * Map star rating to display score band for comparison candidate selection.
+ * Uses display_score (which reflects manual reordering) instead of static star_rating.
+ */
+function getScoreBandForStarRating(starRating: number): { min: number; max: number } {
+  switch (starRating) {
+    case 5: return { min: 8.0, max: 10.0 };
+    case 4: return { min: 6.0, max: 7.9 };
+    case 3: return { min: 4.0, max: 5.9 };
+    case 2: return { min: 2.0, max: 3.9 };
+    case 1: return { min: 1.0, max: 1.9 };
+    default: return { min: 4.0, max: 5.9 }; // Default to 3★ band
+  }
+}
+
+/**
+ * Calculate display score from global position (1-indexed)
+ * Rank #1 = 10.0, last rank = 1.0, linear interpolation between
+ */
+export function calculateDisplayScore(position: number, totalCount: number): number {
+  if (totalCount <= 1) return 10.0;
+  const score = 10.0 - ((position - 1) / (totalCount - 1)) * 9.0;
+  return Number(score.toFixed(1));
+}
+
+/**
+ * Recalculate display scores for all rankings of a user's content type
+ * Called after any reordering or new ranking insertion
+ */
+export async function recalculateAllScores(
+  userId: string,
+  contentType: ContentType
+): Promise<void> {
+  const { data: rankings, error } = await supabase
+    .from('rankings')
+    .select('id, rank_position')
+    .eq('user_id', userId)
+    .eq('content_type', contentType)
+    .order('rank_position', { ascending: true });
+
+  if (error || !rankings || rankings.length === 0) return;
+
+  const total = rankings.length;
+  for (let i = 0; i < rankings.length; i++) {
+    const position = i + 1;
+    const score = calculateDisplayScore(position, total);
+    await supabase
+      .from('rankings')
+      .update({
+        display_score: score,
+        rank_position: position,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', rankings[i].id);
+  }
+}
+
+/**
  * Calculate similarity score between two movies for smarter comparison selection
  */
 function calculateSimilarityScore(candidate: Movie, newMovie: Movie): number {
@@ -185,11 +242,11 @@ export async function getUserRankingsWithRatings(
         content_id: item.content_id,
         content_type: item.content_type,
         rank_position: item.rank_position,
-        elo_score: item.elo_score,
+        display_score: item.display_score,
         created_at: item.created_at,
         updated_at: item.updated_at,
       },
-      star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id)) || 0,
+      star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id) ?? -1) || 0,
     }));
 }
 
@@ -213,30 +270,36 @@ export function initializeRankingState(
 }
 
 /**
- * Initialize ranking state - compares ONLY against movies with same star rating
- * Uses binary search on RANK-SORTED movies for correct monotonic narrowing
+ * Initialize ranking state - compares against movies in the same DISPLAY SCORE band
+ * Uses binary search on SCORE-SORTED movies for correct monotonic narrowing
+ *
+ * This respects manual reordering: if a 5★ movie was demoted to a lower position
+ * (score < 8.0), it won't appear as a comparison candidate for new 5★ movies.
  */
 export function initializeRankingStateWithTier(
   newMovie: Movie,
   starRating: number,
   allRankings: RankedMovie[]
 ): RankingState {
-  // Filter to only movies with the SAME star rating (tier-based comparison)
-  const tierMovies = allRankings.filter(m => m.star_rating === starRating);
-
-  // CRITICAL: Sort by rank_position for binary search correctness
-  // This ensures comparisons monotonically narrow toward insertion point
-  const rankSortedMovies = [...tierMovies].sort(
-    (a, b) => a.ranking.rank_position - b.ranking.rank_position
+  // Filter to movies in the same DISPLAY SCORE band (respects manual reordering)
+  const { min, max } = getScoreBandForStarRating(starRating);
+  const tierMovies = allRankings.filter(m =>
+    m.ranking.display_score >= min && m.ranking.display_score <= max
   );
 
-  const n = rankSortedMovies.length;
+  // Sort by display_score descending for binary search
+  // Higher scores at lower indices (position 0 = best in band)
+  const scoreSortedMovies = [...tierMovies].sort(
+    (a, b) => b.ranking.display_score - a.ranking.display_score
+  );
+
+  const n = scoreSortedMovies.length;
   const maxComparisons = n === 0 ? 0 : Math.ceil(Math.log2(n + 1));
 
   return {
     newMovie,
     starRating,
-    tierMovies: rankSortedMovies,  // Sorted by rank_position for binary search
+    tierMovies: scoreSortedMovies,  // Sorted by display_score for binary search
     allRankings,
     low: 0,
     high: n,
@@ -371,19 +434,22 @@ export async function saveRanking(
         .eq('id', ranking.id);
     }
 
-    // Insert the new ranking with content_type
+    // Insert the new ranking with content_type (display_score calculated after)
     const { error: insertError } = await supabase.from('rankings').insert({
       user_id: userId,
       movie_id: movie.id,
       content_type: contentType,
       rank_position: globalPosition,
-      elo_score: 1500,
+      display_score: 5.0, // Temporary, will be recalculated
     });
 
     if (insertError) {
       console.error('Error inserting ranking:', insertError);
       throw insertError;
     }
+
+    // Recalculate all display scores for this content type
+    await recalculateAllScores(userId, contentType);
 
     console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition} (${contentType})`);
 
@@ -435,6 +501,95 @@ export async function saveRanking(
     console.error('Error in saveRanking:', error);
     throw error;
   }
+}
+
+/**
+ * Reorder rankings after drag-and-drop
+ * Uses negative temporary positions to avoid UNIQUE constraint violations
+ */
+export async function reorderRankings(
+  userId: string,
+  contentType: ContentType,
+  fromIndex: number,
+  toIndex: number
+): Promise<void> {
+  if (fromIndex === toIndex) return;
+
+  // Fetch all rankings for this content type, ordered by position
+  const { data: rankings, error } = await supabase
+    .from('rankings')
+    .select('id, rank_position')
+    .eq('user_id', userId)
+    .eq('content_type', contentType)
+    .order('rank_position', { ascending: true });
+
+  if (error || !rankings || rankings.length === 0) {
+    throw new Error('Failed to fetch rankings');
+  }
+
+  // Convert 0-based indices to 1-based positions
+  const fromPos = fromIndex + 1;
+  const toPos = toIndex + 1;
+  const movingDown = toPos > fromPos;
+
+  // Build list of updates needed
+  const updates: { id: string; tempPos: number; finalPos: number }[] = [];
+
+  // The dragged item
+  const draggedItem = rankings[fromIndex];
+  updates.push({
+    id: draggedItem.id,
+    tempPos: -1,
+    finalPos: toPos,
+  });
+
+  // Items that need to shift
+  if (movingDown) {
+    // Moving down: items between fromPos+1 and toPos shift UP by 1
+    for (let i = fromIndex + 1; i <= toIndex; i++) {
+      updates.push({
+        id: rankings[i].id,
+        tempPos: -(i + 2),
+        finalPos: rankings[i].rank_position - 1,
+      });
+    }
+  } else {
+    // Moving up: items between toPos and fromPos-1 shift DOWN by 1
+    for (let i = toIndex; i < fromIndex; i++) {
+      updates.push({
+        id: rankings[i].id,
+        tempPos: -(i + 2),
+        finalPos: rankings[i].rank_position + 1,
+      });
+    }
+  }
+
+  // Phase 1: Move to temporary negative positions
+  for (const update of updates) {
+    const { error: updateError } = await supabase
+      .from('rankings')
+      .update({ rank_position: update.tempPos, updated_at: new Date().toISOString() })
+      .eq('id', update.id);
+
+    if (updateError) {
+      throw new Error(`Failed to update ranking: ${updateError.message}`);
+    }
+  }
+
+  // Phase 2: Move to final positions
+  for (const update of updates) {
+    const { error: updateError } = await supabase
+      .from('rankings')
+      .update({ rank_position: update.finalPos, updated_at: new Date().toISOString() })
+      .eq('id', update.id);
+
+    if (updateError) {
+      throw new Error(`Failed to update ranking: ${updateError.message}`);
+    }
+  }
+
+  // Recalculate all display scores after reorder
+  await recalculateAllScores(userId, contentType);
 }
 
 /**

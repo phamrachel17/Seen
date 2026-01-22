@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { checkUsernameAvailable, checkEmailAvailable } from '@/lib/validation';
 
@@ -34,6 +35,8 @@ export default function SignUpScreen() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
 
   const handleSignUp = async () => {
     // Clear all errors
@@ -100,6 +103,22 @@ export default function SignUpScreen() {
     }
   };
 
+  const handleResendEmail = async () => {
+    setResending(true);
+    setResendSuccess(false);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+      });
+      if (!error) {
+        setResendSuccess(true);
+      }
+    } finally {
+      setResending(false);
+    }
+  };
+
   if (success) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -114,6 +133,23 @@ export default function SignUpScreen() {
             onPress={() => router.replace('/(auth)/sign-in')}
           >
             <Text style={styles.buttonText}>Go to Sign In</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.resendButton,
+              pressed && styles.buttonPressed,
+              resending && styles.buttonDisabled,
+            ]}
+            onPress={handleResendEmail}
+            disabled={resending}
+          >
+            {resending ? (
+              <ActivityIndicator size="small" color={Colors.textMuted} />
+            ) : (
+              <Text style={styles.resendButtonText}>
+                {resendSuccess ? 'Email sent!' : "Didn't receive it? Resend"}
+              </Text>
+            )}
           </Pressable>
         </View>
       </View>
@@ -408,5 +444,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: Spacing.xl,
     lineHeight: 22,
+  },
+  resendButton: {
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  resendButtonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
   },
 });

@@ -339,7 +339,7 @@ export default function ProfileScreen() {
             icon="list.number"
           />
           <ProfileListRow
-            title="Watchlist"
+            title="Want to Watch"
             count={watchlistCount}
             onPress={() => router.push('/watchlist')}
             icon="bookmark"

@@ -199,7 +199,7 @@ export interface Ranking {
   content_id?: number;
   content_type: ContentType;
   rank_position: number;
-  elo_score: number;
+  display_score: number; // 1-10 score derived from position
   created_at: string;
   updated_at: string;
 }
@@ -248,6 +248,13 @@ export interface Like {
   created_at: string;
 }
 
+export interface CommentLike {
+  id: string;
+  user_id: string;
+  comment_id: string;
+  created_at: string;
+}
+
 export interface Comment {
   id: string;
   user_id: string;
@@ -257,6 +264,9 @@ export interface Comment {
   updated_at: string;
   // Joined data
   user?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+  // Like data (populated when fetching with likes)
+  like_count?: number;
+  liked_by_user?: boolean;
 }
 
 export interface Notification {
@@ -291,4 +301,29 @@ export interface ExternalRatings {
     score: string;    // "92%"
   };
   metascore?: string; // "85"
+}
+
+// ============================================
+// CUSTOM USER LISTS
+// ============================================
+
+export interface UserList {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  icon_name: string;
+  created_at: string;
+  updated_at: string;
+  item_count?: number;
+}
+
+export interface UserListItem {
+  id: string;
+  list_id: string;
+  content_id: number;
+  position: number;
+  added_at: string;
+  content?: Content;
 }

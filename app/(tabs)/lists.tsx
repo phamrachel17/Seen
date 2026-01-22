@@ -15,7 +15,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
-import { Movie, Ranking, Activity, Content } from '@/types';
+import { getUserLists } from '@/lib/user-lists';
+import { Movie, Ranking, Activity, Content, UserList } from '@/types';
 
 interface RankedMovie extends Movie {
   ranking: Ranking;
@@ -33,6 +34,7 @@ export default function ListsScreen() {
   const [rankingsCount, setRankingsCount] = useState(0);
   const [watchlist, setWatchlist] = useState<BookmarkedMovie[]>([]);
   const [currentlyWatching, setCurrentlyWatching] = useState<Activity[]>([]);
+  const [userLists, setUserLists] = useState<UserList[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadRankingsCount = useCallback(async () => {
@@ -97,6 +99,12 @@ export default function ListsScreen() {
     setCurrentlyWatching(activeInProgress);
   }, [user]);
 
+  const loadUserLists = useCallback(async () => {
+    if (!user) return;
+    const lists = await getUserLists(user.id);
+    setUserLists(lists);
+  }, [user]);
+
   // Refresh data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -104,13 +112,14 @@ export default function ListsScreen() {
         loadRankingsCount();
         loadWatchlist();
         loadCurrentlyWatching();
+        loadUserLists();
       }
-    }, [user, loadRankingsCount, loadWatchlist, loadCurrentlyWatching])
+    }, [user, loadRankingsCount, loadWatchlist, loadCurrentlyWatching, loadUserLists])
   );
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadRankingsCount(), loadWatchlist(), loadCurrentlyWatching()]);
+    await Promise.all([loadRankingsCount(), loadWatchlist(), loadCurrentlyWatching(), loadUserLists()]);
     setIsRefreshing(false);
   };
 
@@ -126,17 +135,23 @@ export default function ListsScreen() {
     router.push('/rankings');
   };
 
+  const navigateToList = (listId: string) => {
+    router.push(`/list/${listId}` as any);
+  };
+
+  const navigateToCreateList = () => {
+    router.push('/create-list' as any);
+  };
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Text style={styles.seenTitle}>Seen</Text>
-        <View style={styles.archiveInfo}>
-          <Text style={styles.archiveLabel}>
-            ARCHIVE NO. {String(rankingsCount).padStart(3, '0')}
-          </Text>
-          <Text style={styles.title}>Personal Archive</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.seenTitle}>Seen</Text>
+          <Text style={styles.listsLabel}>YOUR LISTS</Text>
         </View>
+        <Text style={styles.archiveLabel}>Personal Archive</Text>
       </View>
 
       <ScrollView
@@ -177,9 +192,9 @@ export default function ListsScreen() {
           </View>
         </Pressable>
 
-        {/* Watchlist Section */}
+        {/* Want to Watch Section */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Watchlist</Text>
+          <Text style={styles.sectionTitle}>Want to Watch</Text>
           {watchlist.length > 0 ? (
             <Text style={styles.countBadge}>{watchlist.length} films</Text>
           ) : null}
@@ -286,6 +301,60 @@ export default function ListsScreen() {
             </Text>
           </View>
         )}
+
+        {/* My Lists Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>My Lists</Text>
+          {userLists.length > 0 ? (
+            <Text style={styles.countBadge}>{userLists.length} lists</Text>
+          ) : null}
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.watchlistScroll}
+        >
+          {/* Create List Card */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.createListCard,
+              pressed && styles.cardPressed,
+            ]}
+            onPress={navigateToCreateList}
+          >
+            <View style={styles.createListIconContainer}>
+              <IconSymbol name="plus" size={24} color={Colors.stamp} />
+            </View>
+            <Text style={styles.createListText}>Create List</Text>
+          </Pressable>
+
+          {/* User's Custom Lists */}
+          {userLists.map((list) => (
+            <Pressable
+              key={list.id}
+              style={({ pressed }) => [
+                styles.userListCard,
+                pressed && styles.cardPressed,
+              ]}
+              onPress={() => navigateToList(list.id)}
+            >
+              <View style={styles.userListIconContainer}>
+                <IconSymbol
+                  name={list.icon_name as any}
+                  size={24}
+                  color={Colors.text}
+                />
+              </View>
+              <Text style={styles.userListName} numberOfLines={2}>
+                {list.name}
+              </Text>
+              <Text style={styles.userListCount}>
+                {list.item_count || 0} {list.item_count === 1 ? 'item' : 'items'}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </ScrollView>
     </View>
   );
@@ -308,20 +377,21 @@ const styles = StyleSheet.create({
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },
-  archiveInfo: {
-    alignItems: 'flex-end',
+  headerTextContainer: {
+    flex: 1,
+  },
+  listsLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    marginTop: Spacing.xs,
   },
   archiveLabel: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.stamp,
     letterSpacing: 1,
-    marginBottom: Spacing.xs,
-  },
-  title: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes['3xl'],
-    color: Colors.text,
   },
   scrollView: {
     flex: 1,
@@ -460,5 +530,62 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.xs,
     color: Colors.white,
+  },
+  createListCard: {
+    width: 100,
+    height: 150,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createListIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.dust,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  createListText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.stamp,
+  },
+  userListCard: {
+    width: 100,
+    height: 150,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userListIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.dust,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  userListName: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: Spacing.xs,
+  },
+  userListCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
   },
 });

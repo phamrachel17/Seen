@@ -19,6 +19,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { AddToListModal } from '@/components/add-to-list-modal';
 import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
 import { getExternalRatings } from '@/lib/omdb';
 import { getContentByTmdbId, ensureContentExists } from '@/lib/content';
@@ -86,12 +87,27 @@ export default function TitleDetailScreen() {
   // External ratings (IMDb, RT)
   const [externalRatings, setExternalRatings] = useState<ExternalRatings | null>(null);
 
+  // Add to list modal
+  const [showAddToListModal, setShowAddToListModal] = useState(false);
+
   useEffect(() => {
     if (id) {
       loadContent(parseInt(id, 10), type || 'movie');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, type]);
+
+  // Fetch external ratings separately (non-blocking) once we have the IMDb ID
+  useEffect(() => {
+    const fetchRatings = async () => {
+      const imdbId = movieDetails?.imdb_id || tvDetails?.imdb_id;
+      if (imdbId) {
+        const ratings = await getExternalRatings(imdbId);
+        setExternalRatings(ratings);
+      }
+    };
+    fetchRatings();
+  }, [movieDetails?.imdb_id, tvDetails?.imdb_id]);
 
   // Reload user data when screen regains focus (after returning from log-activity)
   useFocusEffect(
@@ -107,21 +123,12 @@ export default function TitleDetailScreen() {
       setIsLoading(true);
 
       // Load content details from TMDB
-      let imdbId: string | undefined;
       if (contentType === 'movie') {
         const details = await getMovieDetails(tmdbId);
         setMovieDetails(details);
-        imdbId = details.imdb_id;
       } else {
         const details = await getTVShowDetails(tmdbId);
         setTVDetails(details);
-        imdbId = details.imdb_id;
-      }
-
-      // Fetch external ratings (IMDb, RT) if we have an IMDB ID
-      if (imdbId) {
-        const ratings = await getExternalRatings(imdbId);
-        setExternalRatings(ratings);
       }
 
       // Ensure content exists in DB
@@ -466,6 +473,16 @@ export default function TitleDetailScreen() {
                   color={Colors.stamp}
                 />
               </Pressable>
+              <Pressable
+                onPress={() => setShowAddToListModal(true)}
+                style={styles.addToListButtonInline}
+              >
+                <IconSymbol
+                  name="plus.rectangle.on.folder"
+                  size={22}
+                  color={Colors.stamp}
+                />
+              </Pressable>
             </View>
           </View>
 
@@ -517,7 +534,7 @@ export default function TitleDetailScreen() {
               {externalRatings.imdb && (
                 <View style={styles.externalRating}>
                   <Image
-                    source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/IMDB_Logo_2016.svg/120px-IMDB_Logo_2016.svg.png' }}
+                    source={require('@/assets/images/imdb-logo.png')}
                     style={styles.imdbLogo}
                     contentFit="contain"
                   />
@@ -528,7 +545,7 @@ export default function TitleDetailScreen() {
               {externalRatings.rottenTomatoes && (
                 <View style={styles.externalRating}>
                   <Image
-                    source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Rotten_Tomatoes.svg/48px-Rotten_Tomatoes.svg.png' }}
+                    source={require('@/assets/images/rotten-tomatoes-logo.png')}
                     style={styles.rtLogo}
                     contentFit="contain"
                   />
@@ -743,6 +760,16 @@ export default function TitleDetailScreen() {
           <CastCrewSection cast={cast} crew={crew} />
         )}
       </Animated.ScrollView>
+
+      {/* Add to List Modal */}
+      {content && (
+        <AddToListModal
+          visible={showAddToListModal}
+          onClose={() => setShowAddToListModal(false)}
+          contentId={content.id}
+          contentTitle={title}
+        />
+      )}
     </View>
   );
 }
@@ -895,6 +922,9 @@ const styles = StyleSheet.create({
   bookmarkButtonInline: {
     padding: Spacing.xs,
   },
+  addToListButtonInline: {
+    padding: Spacing.xs,
+  },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -947,7 +977,9 @@ const styles = StyleSheet.create({
   },
   externalRatingsRow: {
     flexDirection: 'row',
-    gap: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.lg,
+    marginTop: Spacing.sm,
     marginBottom: Spacing.lg,
   },
   externalRating: {
@@ -956,18 +988,18 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   imdbLogo: {
-    width: 40,
-    height: 20,
+    width: 45,
+    height: 22,
     marginRight: Spacing.xs,
   },
   rtLogo: {
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     marginRight: Spacing.xs,
   },
   ratingValue: {
-    fontFamily: Fonts.serifBold,
-    fontSize: FontSizes.lg,
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
     color: Colors.text,
   },
   ratingMax: {

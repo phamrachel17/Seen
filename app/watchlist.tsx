@@ -90,7 +90,7 @@ export default function WatchlistScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{isOwnWatchlist ? 'Watchlist' : 'Their Watchlist'}</Text>
+        <Text style={styles.headerTitle}>{isOwnWatchlist ? 'Want to Watch' : 'Their Want to Watch'}</Text>
         <View style={styles.headerSpacer} />
       </View>
 

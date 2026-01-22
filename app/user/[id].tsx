@@ -344,7 +344,7 @@ export default function UserProfileScreen() {
             icon="list.number"
           />
           <ProfileListRow
-            title="Watchlist"
+            title="Want to Watch"
             count={watchlistCount}
             onPress={() => router.push(`/watchlist?userId=${userId}`)}
             icon="bookmark"

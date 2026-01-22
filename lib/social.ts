@@ -112,7 +112,8 @@ export async function addComment(
     return null;
   }
 
-  return data as Comment;
+  // New comments start with 0 likes
+  return { ...data, like_count: 0, liked_by_user: false } as Comment;
 }
 
 export async function deleteComment(commentId: string): Promise<boolean> {
@@ -140,6 +141,63 @@ export async function getReviewComments(reviewId: string): Promise<Comment[]> {
   }
 
   return data as Comment[];
+}
+
+export async function getReviewCommentsWithLikes(
+  reviewId: string,
+  currentUserId?: string
+): Promise<Comment[]> {
+  // Fetch comments
+  const { data: commentsData, error: commentsError } = await supabase
+    .from('comments')
+    .select(`
+      *,
+      user:users!comments_user_id_fkey (id, username, display_name, profile_image_url)
+    `)
+    .eq('review_id', reviewId)
+    .order('created_at', { ascending: true });
+
+  if (commentsError || !commentsData) {
+    console.error('Error fetching review comments:', commentsError);
+    return [];
+  }
+
+  if (commentsData.length === 0) {
+    return [];
+  }
+
+  const commentIds = commentsData.map(c => c.id);
+
+  // Fetch like counts for all comments
+  const { data: likeCounts } = await supabase
+    .from('comment_likes')
+    .select('comment_id')
+    .in('comment_id', commentIds);
+
+  // Count likes per comment
+  const likeCountMap = new Map<string, number>();
+  for (const like of likeCounts || []) {
+    likeCountMap.set(like.comment_id, (likeCountMap.get(like.comment_id) || 0) + 1);
+  }
+
+  // Check which comments current user has liked
+  let userLikedSet = new Set<string>();
+  if (currentUserId) {
+    const { data: userLikes } = await supabase
+      .from('comment_likes')
+      .select('comment_id')
+      .eq('user_id', currentUserId)
+      .in('comment_id', commentIds);
+
+    userLikedSet = new Set((userLikes || []).map(l => l.comment_id));
+  }
+
+  // Merge like data into comments
+  return commentsData.map(comment => ({
+    ...comment,
+    like_count: likeCountMap.get(comment.id) || 0,
+    liked_by_user: userLikedSet.has(comment.id),
+  })) as Comment[];
 }
 
 export async function getCommentCount(reviewId: string): Promise<number> {
@@ -473,7 +531,117 @@ export async function addActivityComment(
     return null;
   }
 
-  return data as Comment;
+  // New comments start with 0 likes
+  return { ...data, like_count: 0, liked_by_user: false } as Comment;
+}
+
+// ============ COMMENT LIKES ============
+
+export async function likeComment(
+  userId: string,
+  commentId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('comment_likes')
+    .insert({ user_id: userId, comment_id: commentId });
+
+  if (error) {
+    console.error('Error liking comment:', error);
+  }
+
+  return !error;
+}
+
+export async function unlikeComment(
+  userId: string,
+  commentId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('comment_likes')
+    .delete()
+    .eq('user_id', userId)
+    .eq('comment_id', commentId);
+
+  return !error;
+}
+
+export async function toggleCommentLike(
+  userId: string,
+  commentId: string,
+  isCurrentlyLiked: boolean
+): Promise<boolean> {
+  if (isCurrentlyLiked) {
+    return unlikeComment(userId, commentId);
+  } else {
+    return likeComment(userId, commentId);
+  }
+}
+
+export async function getCommentLikeCount(commentId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('comment_likes')
+    .select('id', { count: 'exact', head: true })
+    .eq('comment_id', commentId);
+
+  if (error) return 0;
+  return count || 0;
+}
+
+export async function getActivityCommentsWithLikes(
+  activityId: string,
+  currentUserId?: string
+): Promise<Comment[]> {
+  // Fetch comments
+  const { data: commentsData, error: commentsError } = await supabase
+    .from('comments')
+    .select(`
+      *,
+      user:users!comments_user_id_fkey (id, username, display_name, profile_image_url)
+    `)
+    .eq('review_id', activityId)
+    .order('created_at', { ascending: true });
+
+  if (commentsError || !commentsData) {
+    console.error('Error fetching activity comments:', commentsError);
+    return [];
+  }
+
+  if (commentsData.length === 0) {
+    return [];
+  }
+
+  const commentIds = commentsData.map(c => c.id);
+
+  // Fetch like counts for all comments
+  const { data: likeCounts } = await supabase
+    .from('comment_likes')
+    .select('comment_id')
+    .in('comment_id', commentIds);
+
+  // Count likes per comment
+  const likeCountMap = new Map<string, number>();
+  for (const like of likeCounts || []) {
+    likeCountMap.set(like.comment_id, (likeCountMap.get(like.comment_id) || 0) + 1);
+  }
+
+  // Check which comments current user has liked
+  let userLikedSet = new Set<string>();
+  if (currentUserId) {
+    const { data: userLikes } = await supabase
+      .from('comment_likes')
+      .select('comment_id')
+      .eq('user_id', currentUserId)
+      .in('comment_id', commentIds);
+
+    userLikedSet = new Set((userLikes || []).map(l => l.comment_id));
+  }
+
+  // Merge like data into comments
+  return commentsData.map(comment => ({
+    ...comment,
+    like_count: likeCountMap.get(comment.id) || 0,
+    liked_by_user: userLikedSet.has(comment.id),
+  })) as Comment[];
 }
 
 // ============ FRIENDS' REVIEWS ============

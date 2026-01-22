@@ -21,10 +21,11 @@ import { FriendChipsDisplay } from '@/components/friend-chips';
 import {
   getActivityLikes,
   toggleActivityLike,
-  getActivityComments,
+  getActivityCommentsWithLikes,
   addActivityComment,
   deleteComment,
   createNotification,
+  toggleCommentLike,
 } from '@/lib/social';
 import { getActivityById, formatProgress } from '@/lib/activity';
 import { useAuth } from '@/lib/auth-context';
@@ -79,7 +80,7 @@ export default function ActivityDetailScreen() {
 
     const [likes, activityComments] = await Promise.all([
       getActivityLikes(id, user?.id),
-      getActivityComments(id),
+      getActivityCommentsWithLikes(id, user?.id),
     ]);
 
     setLikeCount(likes.count);
@@ -153,6 +154,51 @@ export default function ActivityDetailScreen() {
     const success = await deleteComment(commentId);
     if (success) {
       setComments((prev) => prev.filter((c) => c.id !== commentId));
+    }
+  };
+
+  const handleCommentLike = async (comment: Comment) => {
+    if (!user) return;
+
+    const wasLiked = comment.liked_by_user || false;
+
+    // Optimistic update
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === comment.id
+          ? {
+              ...c,
+              liked_by_user: !wasLiked,
+              like_count: (c.like_count || 0) + (wasLiked ? -1 : 1),
+            }
+          : c
+      )
+    );
+
+    const success = await toggleCommentLike(user.id, comment.id, wasLiked);
+
+    if (!success) {
+      // Revert on failure
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === comment.id
+            ? {
+                ...c,
+                liked_by_user: wasLiked,
+                like_count: (c.like_count || 0) + (wasLiked ? 1 : -1),
+              }
+            : c
+        )
+      );
+    } else if (!wasLiked && comment.user_id !== user.id) {
+      // Send notification when liking someone else's comment
+      await createNotification({
+        user_id: comment.user_id,
+        actor_id: user.id,
+        type: 'like',
+        activity_id: activity?.id,
+        comment_id: comment.id,
+      });
     }
   };
 
@@ -366,37 +412,60 @@ export default function ActivityDetailScreen() {
           ) : (
             <View style={styles.commentsList}>
               {comments.map((comment) => (
-                <View key={comment.id} style={styles.commentItem}>
-                  <Pressable onPress={() => handleUserPress(comment.user_id)}>
-                    <ProfileAvatar
-                      imageUrl={comment.user?.profile_image_url}
-                      username={comment.user?.username || '?'}
-                      size="tiny"
-                      variant="circle"
-                    />
-                  </Pressable>
-                  <View style={styles.commentContent}>
-                    <View style={styles.commentHeader}>
-                      <Pressable onPress={() => handleUserPress(comment.user_id)}>
-                        <Text style={styles.commentAuthor}>
-                          {comment.user?.display_name || comment.user?.username}
-                        </Text>
-                      </Pressable>
-                      <Text style={styles.commentTime}>
-                        {formatCommentTime(comment.created_at)}
-                      </Text>
-                    </View>
-                    <Text style={styles.commentText}>{comment.content}</Text>
-                  </View>
-                  {comment.user_id === user?.id && (
-                    <Pressable
-                      style={styles.deleteButton}
-                      onPress={() => handleDeleteComment(comment.id)}
-                      hitSlop={8}
-                    >
-                      <IconSymbol name="trash" size={14} color={Colors.textMuted} />
+                <View key={comment.id} style={styles.commentItemWrapper}>
+                  <View style={styles.commentItem}>
+                    <Pressable onPress={() => handleUserPress(comment.user_id)}>
+                      <ProfileAvatar
+                        imageUrl={comment.user?.profile_image_url}
+                        username={comment.user?.username || '?'}
+                        size="tiny"
+                        variant="circle"
+                      />
                     </Pressable>
-                  )}
+                    <View style={styles.commentContent}>
+                      <View style={styles.commentHeader}>
+                        <Pressable onPress={() => handleUserPress(comment.user_id)}>
+                          <Text style={styles.commentAuthor}>
+                            {comment.user?.display_name || comment.user?.username}
+                          </Text>
+                        </Pressable>
+                        <Text style={styles.commentTime}>
+                          {formatCommentTime(comment.created_at)}
+                        </Text>
+                      </View>
+                      <Text style={styles.commentText}>{comment.content}</Text>
+                    </View>
+                    {comment.user_id === user?.id && (
+                      <Pressable
+                        style={styles.deleteButton}
+                        onPress={() => handleDeleteComment(comment.id)}
+                        hitSlop={8}
+                      >
+                        <IconSymbol name="trash" size={14} color={Colors.textMuted} />
+                      </Pressable>
+                    )}
+                  </View>
+                  <Pressable
+                    style={styles.commentLikeButton}
+                    onPress={() => handleCommentLike(comment)}
+                    hitSlop={8}
+                  >
+                    <IconSymbol
+                      name={comment.liked_by_user ? 'heart.fill' : 'heart'}
+                      size={14}
+                      color={comment.liked_by_user ? Colors.stamp : Colors.textMuted}
+                    />
+                    {(comment.like_count || 0) > 0 && (
+                      <Text
+                        style={[
+                          styles.commentLikeCount,
+                          comment.liked_by_user && styles.commentLikeCountActive,
+                        ]}
+                      >
+                        {comment.like_count}
+                      </Text>
+                    )}
+                  </Pressable>
                 </View>
               ))}
             </View>
@@ -625,6 +694,9 @@ const styles = StyleSheet.create({
   commentsList: {
     gap: Spacing.lg,
   },
+  commentItemWrapper: {
+    gap: Spacing.xs,
+  },
   commentItem: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -657,9 +729,23 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: FontSizes.sm * 1.5,
   },
+  commentLikeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: Spacing.xs,
+    marginLeft: 40, // Align with comment content (avatar width + gap)
+  },
+  commentLikeCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+  },
+  commentLikeCountActive: {
+    color: Colors.stamp,
+  },
   deleteButton: {
     padding: Spacing.xs,
-    alignSelf: 'flex-start',
   },
   commentInputContainer: {
     flexDirection: 'row',

@@ -42,16 +42,18 @@ export const Colors = {
 
 /**
  * Typography - Custom Fonts
- * Libre Baskerville: Elegant serif for titles/headings
+ * Nanum Myeongjo: Korean serif for titles/headings
+ * Libre Baskerville: Elegant serif (fallback/italic)
  * Inter: Clean sans-serif for body text
  */
 export const Fonts = {
-  // Display - Libre Baskerville (for titles, headings)
-  serif: 'LibreBaskerville_400Regular',
-  serifMedium: 'LibreBaskerville_400Regular',
-  serifSemiBold: 'LibreBaskerville_700Bold',
-  serifBold: 'LibreBaskerville_700Bold',
-  serifItalic: 'LibreBaskerville_400Regular_Italic',
+  // Display - Nanum Myeongjo (for titles, headings)
+  serif: 'NanumMyeongjo_400Regular',
+  serifMedium: 'NanumMyeongjo_400Regular',
+  serifSemiBold: 'NanumMyeongjo_700Bold',
+  serifBold: 'NanumMyeongjo_700Bold',
+  serifExtraBold: 'NanumMyeongjo_800ExtraBold',
+  serifItalic: 'LibreBaskerville_400Regular_Italic', // Nanum Myeongjo doesn't have italic
   serifBoldItalic: 'LibreBaskerville_700Bold',
 
   // Sans - Inter (for body, labels)

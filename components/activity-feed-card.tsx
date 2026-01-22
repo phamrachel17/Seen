@@ -202,7 +202,7 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
             </View>
           )}
 
-          {/* In Progress: Show status indicator */}
+          {/* In Progress: Show status indicator and progress */}
           {isInProgress && (
             <View style={styles.progressRow}>
               <IconSymbol name="play.circle.fill" size={14} color={Colors.textMuted} />
@@ -211,6 +211,9 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
                   <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
                 </View>
               )}
+              <Text style={styles.progressText}>
+                {formatProgress(activity) || 'In Progress'}
+              </Text>
             </View>
           )}
 
@@ -226,15 +229,6 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
             </Text>
           )}
         </View>
-
-        {/* In Progress: Progress on right side */}
-        {isInProgress && (
-          <View style={styles.progressRight}>
-            <Text style={styles.progressText}>
-              {formatProgress(activity) || 'In Progress'}
-            </Text>
-          </View>
-        )}
       </View>
 
       {/* Watched With */}
@@ -392,16 +386,10 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     marginBottom: Spacing.sm,
   },
-  progressRight: {
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-    paddingTop: Spacing.xs,
-  },
   progressText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
-    textAlign: 'right',
   },
   reviewText: {
     fontFamily: Fonts.sans,

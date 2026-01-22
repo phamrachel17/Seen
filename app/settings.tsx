@@ -1,12 +1,4 @@
-import { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
@@ -16,8 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signOut, deleteAccount } = useAuth();
-  const [isDeleting, setIsDeleting] = useState(false);
+  const { signOut } = useAuth();
 
   const handleSignOut = () => {
     Alert.alert(
@@ -28,42 +19,6 @@ export default function SettingsScreen() {
         { text: 'Sign Out', style: 'destructive', onPress: signOut },
       ]
     );
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure you want to permanently delete your account?\n\nAll your reviews, rankings, watchlist items, and social connections will be permanently deleted. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: confirmDeleteAccount },
-      ]
-    );
-  };
-
-  const confirmDeleteAccount = () => {
-    Alert.alert(
-      'Final Confirmation',
-      'This will permanently delete your account and all your data.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete My Account',
-          style: 'destructive',
-          onPress: executeDeleteAccount,
-        },
-      ]
-    );
-  };
-
-  const executeDeleteAccount = async () => {
-    setIsDeleting(true);
-    const { error } = await deleteAccount();
-
-    if (error) {
-      setIsDeleting(false);
-      Alert.alert('Error', 'Failed to delete account. Please try again.');
-    }
   };
 
   return (
@@ -90,31 +45,23 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
+        {/* Your Account */}
+        <Pressable
+          style={({ pressed }) => [styles.settingsRow, pressed && styles.rowPressed]}
+          onPress={() => router.push('/account')}
+        >
+          <Text style={styles.settingsRowText}>Your Account</Text>
+          <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
+        </Pressable>
+
+        <View style={styles.divider} />
+
         {/* Sign Out */}
         <Pressable
           style={({ pressed }) => [styles.settingsRow, pressed && styles.rowPressed]}
           onPress={handleSignOut}
         >
           <Text style={styles.settingsRowText}>Sign Out</Text>
-        </Pressable>
-
-        <View style={styles.divider} />
-
-        {/* Delete Account */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.settingsRow,
-            pressed && styles.rowPressed,
-            isDeleting && styles.rowDisabled,
-          ]}
-          onPress={handleDeleteAccount}
-          disabled={isDeleting}
-        >
-          {isDeleting ? (
-            <ActivityIndicator size="small" color={Colors.error} />
-          ) : (
-            <Text style={styles.deleteAccountText}>Delete Account</Text>
-          )}
         </Pressable>
       </View>
     </View>
@@ -165,18 +112,10 @@ const styles = StyleSheet.create({
   rowPressed: {
     opacity: 0.7,
   },
-  rowDisabled: {
-    opacity: 0.5,
-  },
   settingsRowText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.text,
-  },
-  deleteAccountText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.error,
   },
   divider: {
     height: 1,

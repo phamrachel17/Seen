@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.rankings (
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   movie_id INTEGER REFERENCES public.movies(id) ON DELETE CASCADE NOT NULL,
   rank_position INTEGER NOT NULL,
-  elo_score NUMERIC DEFAULT 1500, -- For ranking algorithm
+  display_score NUMERIC DEFAULT 5.0, -- 1-10 score derived from position
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, movie_id),
