@@ -8,9 +8,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -250,11 +251,7 @@ export default function ActivityDetailScreen() {
   };
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!activity || !activity.content || !activity.user) {

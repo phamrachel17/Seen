@@ -13,7 +13,9 @@ import {
   Animated as RNAnimated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Alert,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -30,11 +32,13 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { StarRating } from '@/components/star-rating';
 import { SuggestedFriendPills } from '@/components/suggested-friend-pills';
 import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
 import { getPendingFriendSelection } from '@/lib/friend-picker-state';
 import { getContentById, ensureContentExists } from '@/lib/content';
 import {
   createActivity,
   updateActivity,
+  deleteActivity,
   getUserCompletedActivity,
   getUserInProgressActivity,
   getActiveWatch,
@@ -48,6 +52,7 @@ import {
 import { Activity, Watch } from '@/types';
 import { getMovieDetails, getTVShowDetails, getSeasonDetails } from '@/lib/tmdb';
 import { Content, ContentType, MovieDetails, TVShowDetails, Episode, ActivityStatus } from '@/types';
+import { deleteRankingWithActivity } from '@/lib/ranking';
 
 type Step = 'existing_choice' | 'watch_conflict' | 'status' | 'completed' | 'in_progress';
 
@@ -428,10 +433,12 @@ export default function LogActivityModal() {
     contentType?: ContentType;
     editMode?: string;  // 'true' to skip choice screen and go directly to edit form
     editInProgress?: string;  // 'true' to skip directly to in-progress edit form
+    editDetailsOnly?: string;  // 'true' to edit details without rating/ranking
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { invalidate } = useCache();
 
   // Content state
   const [content, setContent] = useState<Content | null>(null);
@@ -462,6 +469,7 @@ export default function LogActivityModal() {
   const [starRating, setStarRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
   const [ratedSeason, setRatedSeason] = useState<number | undefined>(undefined);
+  const [skipRanking, setSkipRanking] = useState(false);  // Skip ranking flow on save
 
   // In Progress form state
   const [note, setNote] = useState('');
@@ -574,8 +582,13 @@ export default function LogActivityModal() {
             setWatchDate(new Date(completed.watch_date));
           }
           setIsPrivate(completed.is_private);
-          // Check if editMode is set to skip directly to edit form
-          if (params.editMode === 'true') {
+          // Check if editDetailsOnly is set (from tapping Your Take card)
+          if (params.editDetailsOnly === 'true') {
+            setSelectedStatus('completed');
+            setStep('completed');
+            setSkipRanking(true);  // Don't trigger ranking on save
+          } else if (params.editMode === 'true') {
+            // editMode skips to edit form with rating (for re-ranking)
             setSelectedStatus('completed');
             setStep('completed');  // Skip choice screen, go directly to edit form
           } else {
@@ -729,12 +742,8 @@ export default function LogActivityModal() {
       }
 
       if (activity) {
-        const isNewActivity = !existingCompleted;
-        const ratingChanged = existingCompleted &&
-          (existingCompleted.star_rating || 0) !== starRating;
-
-        if (selectedStatus === 'completed' && starRating > 0 && (isNewActivity || ratingChanged)) {
-          // Navigate to ranking flow for new activities OR when rating changed
+        // Navigate to ranking flow only if not in edit-details-only mode
+        if (selectedStatus === 'completed' && starRating > 0 && !skipRanking) {
           router.replace(`/rank/${content.tmdb_id}?starRating=${starRating}&contentType=${content.content_type}`);
         } else {
           router.back();
@@ -747,6 +756,67 @@ export default function LogActivityModal() {
     }
   };
 
+  const handleDeleteReview = () => {
+    if (!user || !content) return;
+
+    const type = content.content_type || params.contentType;
+    if (!type) return;
+
+    Alert.alert(
+      'Delete Review',
+      'This will delete your review, rating, and remove this title from your rankings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSaving(true);
+            try {
+              await deleteRankingWithActivity(user.id, content.tmdb_id, type);
+              invalidate('ranking_delete', user.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting:', error);
+              Alert.alert('Error', 'Failed to delete. Please try again.');
+            } finally {
+              setIsSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteInProgress = () => {
+    if (!user || !existingInProgress) return;
+
+    Alert.alert(
+      'Delete Progress',
+      'This will delete your in-progress activity for this title.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSaving(true);
+            try {
+              await deleteActivity(existingInProgress.id);
+              invalidate('activity_delete', user.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting in-progress activity:', error);
+              Alert.alert('Error', 'Failed to delete. Please try again.');
+            } finally {
+              setIsSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const contentTitle = content?.title || movieDetails?.title || tvDetails?.title || '';
   const contentYear = content?.release_year || movieDetails?.release_year || tvDetails?.release_year;
   const contentPoster = content?.poster_url || movieDetails?.poster_url || tvDetails?.poster_url;
@@ -755,11 +825,7 @@ export default function LogActivityModal() {
   const totalSeasons = tvDetails?.total_seasons || content?.total_seasons || 1;
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!content && !movieDetails && !tvDetails) {
@@ -876,7 +942,7 @@ export default function LogActivityModal() {
               )}
             </View>
 
-            {/* Option 1: Edit existing */}
+            {/* Option 1: Re-rank and edit rating */}
             <Pressable
               style={({ pressed }) => [
                 styles.choiceButton,
@@ -885,14 +951,15 @@ export default function LogActivityModal() {
               onPress={() => {
                 setSelectedStatus('completed');
                 setStep('completed');
+                setSkipRanking(false);  // Will trigger ranking flow
               }}
             >
               <View style={styles.choiceButtonIcon}>
-                <IconSymbol name="pencil" size={20} color={Colors.stamp} />
+                <IconSymbol name="arrow.up.arrow.down" size={20} color={Colors.stamp} />
               </View>
               <View style={styles.choiceButtonContent}>
-                <Text style={styles.choiceButtonTitle}>Edit your rating</Text>
-                <Text style={styles.choiceButtonSubtitle}>Update your rating or review</Text>
+                <Text style={styles.choiceButtonTitle}>Re-rank and edit rating</Text>
+                <Text style={styles.choiceButtonSubtitle}>Change your star rating and re-rank</Text>
               </View>
               <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />
             </Pressable>
@@ -1041,18 +1108,24 @@ export default function LogActivityModal() {
             {/* Form Header */}
             <View style={styles.formHeader}>
               <Text style={styles.formHeaderText}>
-                {existingCompleted ? 'Edit Your Rating' : `Completing Watch #${activeWatch?.watch_number || nextWatchNumber}`}
+                {skipRanking
+                  ? 'Edit Review Details'
+                  : existingCompleted
+                    ? 'Edit Your Rating'
+                    : `Completing Watch #${activeWatch?.watch_number || nextWatchNumber}`}
               </Text>
             </View>
 
-            {/* Star Rating */}
-            <View style={styles.ratingSection}>
-              <Text style={styles.sectionLabel}>RATING</Text>
-              <StarRating rating={starRating} onRatingChange={setStarRating} size={40} />
-            </View>
+            {/* Star Rating - hidden when editing details only */}
+            {!skipRanking && (
+              <View style={styles.ratingSection}>
+                <Text style={styles.sectionLabel}>RATING</Text>
+                <StarRating rating={starRating} onRatingChange={setStarRating} size={40} />
+              </View>
+            )}
 
-            {/* TV Season Rating */}
-            {contentType === 'tv' && totalSeasons > 1 && (
+            {/* TV Season Rating - hidden when editing details only */}
+            {!skipRanking && contentType === 'tv' && totalSeasons > 1 && (
               <View style={styles.seasonRatingSection}>
                 <Text style={styles.sectionLabel}>RATING FOR</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1176,19 +1249,33 @@ export default function LogActivityModal() {
               style={({ pressed }) => [
                 styles.saveButton,
                 pressed && styles.buttonPressed,
-                (isSaving || starRating === 0) && styles.buttonDisabled,
+                (isSaving || (!skipRanking && starRating === 0)) && styles.buttonDisabled,
               ]}
               onPress={handleSave}
-              disabled={isSaving || starRating === 0}
+              disabled={isSaving || (!skipRanking && starRating === 0)}
             >
               {isSaving ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
                 <Text style={styles.saveButtonText}>
-                  {starRating > 0 ? 'Save & Rank' : 'Save'}
+                  {skipRanking ? 'Save' : starRating > 0 ? 'Save & Rank' : 'Save'}
                 </Text>
               )}
             </Pressable>
+
+            {/* Delete Button - only shown when editing from Your Take */}
+            {params.editDetailsOnly === 'true' && existingCompleted && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={handleDeleteReview}
+                disabled={isSaving}
+              >
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -1348,9 +1435,23 @@ export default function LogActivityModal() {
               {isSaving ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
-                <Text style={styles.saveButtonText}>Log Progress</Text>
+                <Text style={styles.saveButtonText}>Save Progress</Text>
               )}
             </Pressable>
+
+            {/* Delete Button - only shown when editing in-progress activity */}
+            {params.editInProgress === 'true' && existingInProgress && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={handleDeleteInProgress}
+                disabled={isSaving}
+              >
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </Pressable>
+            )}
           </View>
         )}
       </ScrollView>
@@ -1806,6 +1907,16 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  deleteButton: {
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+  },
+  deleteButtonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.error,
   },
   // Watch number badge
   watchNumberBadge: {

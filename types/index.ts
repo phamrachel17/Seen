@@ -22,6 +22,7 @@ export interface Movie {
   runtime_minutes?: number;
   collection_id?: number;    // TMDB collection ID (franchise)
   collection_name?: string;  // e.g., "The Dark Knight Collection"
+  rating?: number;           // TMDB vote_average (0-10)
 }
 
 export interface CastMember {
@@ -37,6 +38,13 @@ export interface CrewMember {
   job: string;
   department: string;
   profile_url: string;
+}
+
+export interface Person {
+  id: number;
+  name: string;
+  profile_url: string;
+  known_for_department: string;
 }
 
 // Extended movie details returned from getMovieDetails (includes cast/crew)
@@ -64,6 +72,7 @@ export interface TVShow {
   total_episodes?: number;
   episode_runtime?: number; // Average episode runtime in minutes
   content_type?: 'tv';
+  rating?: number;          // TMDB vote_average (0-10)
 }
 
 export interface Season {
@@ -274,12 +283,19 @@ export interface Notification {
   user_id: string;
   actor_id: string;
   type: 'like' | 'comment' | 'tagged' | 'follow';
-  review_id?: string;
+  review_id?: string; // Maps to activity_log.id
   comment_id?: string;
   read: boolean;
   created_at: string;
   // Joined data
   actor?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+  // Activity data (from activity_log, replaces old review join)
+  activity?: {
+    id: string;
+    content_id: number;
+    content?: Pick<Content, 'id' | 'tmdb_id' | 'title' | 'poster_url' | 'content_type'>;
+  };
+  // Legacy review data (kept for backward compatibility)
   review?: Pick<Review, 'id' | 'movie_id'> & { movies?: Pick<Movie, 'id' | 'title' | 'poster_url'> };
 }
 
@@ -326,4 +342,63 @@ export interface UserListItem {
   position: number;
   added_at: string;
   content?: Content;
+}
+
+// ============================================
+// PICK FOR ME TYPES
+// ============================================
+
+export type PickMood = 'intense' | 'chill' | 'thoughtful' | 'fun';
+export type PickTimeCommitment = 'quick' | 'standard' | 'epic';
+export type PickOutcome = 'accepted' | 'skipped' | 'saved' | 'pending';
+export type ExplanationType =
+  | 'friend_loved'
+  | 'friend_watched'
+  | 'genre_match'
+  | 'trending'
+  | 'highly_rated'
+  | 'hidden_gem';
+
+export interface PickFilters {
+  contentType: ContentType;
+  genres?: string[];
+  mood?: PickMood;
+  timeCommitment?: PickTimeCommitment;
+}
+
+export interface PickScoreBreakdown {
+  genreMatch: number;
+  friendWatched: number;
+  friendHighRating: number;
+  userHistoryMatch: number;
+  trending: number;
+  recentRelease: number;
+  randomBoost: number;
+}
+
+export interface PickExplanation {
+  type: ExplanationType;
+  text: string;
+  friendName?: string;
+  friendRating?: number;
+  matchedGenres?: string[];
+}
+
+export interface PickSuggestion {
+  id: string;
+  contentId: number;
+  contentType: ContentType;
+  sessionId: string;
+  content: Movie | TVShow;
+  scoreBreakdown: PickScoreBreakdown;
+  totalScore: number;
+  explanation: PickExplanation;
+  outcome: PickOutcome;
+  outcomeAt?: string;
+  createdAt: string;
+}
+
+export interface PickForMeResult {
+  suggestion: PickSuggestion;
+  alternatesAvailable: boolean;
 }

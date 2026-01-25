@@ -10,7 +10,9 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -22,9 +24,10 @@ import { SuggestedFriendPills } from '@/components/suggested-friend-pills';
 import { getMovieDetails } from '@/lib/tmdb';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
 import { createNotification } from '@/lib/social';
 import { getPendingFriendSelection } from '@/lib/friend-picker-state';
-import { removeRanking } from '@/lib/ranking';
+import { deleteRankingWithActivity } from '@/lib/ranking';
 import { getWatchDates, addWatchDate, removeWatchDate } from '@/lib/watch-history';
 import { Movie, Review, WatchHistoryEntry } from '@/types';
 
@@ -35,6 +38,7 @@ export default function ReviewModal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { invalidate } = useCache();
 
   const [movie, setMovie] = useState<Movie | null>(null);
   const [existingReview, setExistingReview] = useState<Review | null>(null);
@@ -182,9 +186,9 @@ export default function ReviewModal() {
 
         // Check if star rating changed - need to re-rank
         if (originalStarRating !== null && starRating !== originalStarRating) {
-          // Delete existing ranking first, then trigger ranking flow
-          await removeRanking(user.id, movie.id, 'movie');
-          router.replace(`/rank/${movie.id}?starRating=${starRating}&contentType=movie`);
+          // Pass replaceExisting flag - rank screen will remove old ranking after new one is saved
+          // This prevents data loss if navigation fails
+          router.replace(`/rank/${movie.id}?starRating=${starRating}&contentType=movie&replaceExisting=true`);
         } else {
           // No rating change, just go back
           router.back();
@@ -225,19 +229,35 @@ export default function ReviewModal() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!existingReview || !user) return;
+  const handleDelete = () => {
+    if (!existingReview || !user || !movie) return;
 
-    setIsSaving(true);
+    Alert.alert(
+      'Delete Review',
+      'This will delete your review, rating, and remove this title from your rankings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSaving(true);
 
-    try {
-      await supabase.from('reviews').delete().eq('id', existingReview.id);
-      router.back();
-    } catch (error) {
-      console.error('Error deleting review:', error);
-    } finally {
-      setIsSaving(false);
-    }
+            try {
+              // Delete ranking, activity, and review in one call
+              await deleteRankingWithActivity(user.id, movie.id, 'movie');
+              invalidate('ranking_delete', user.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting review:', error);
+              Alert.alert('Error', 'Failed to delete review. Please try again.');
+            } finally {
+              setIsSaving(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleAddWatchDate = () => {
@@ -260,11 +280,7 @@ export default function ReviewModal() {
   };
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!movie) {

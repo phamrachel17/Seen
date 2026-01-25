@@ -1,8 +1,69 @@
-import { Movie, MovieDetails, CastMember, CrewMember, TVShow, TVShowDetails, Season, Episode } from '@/types';
+import { Movie, MovieDetails, CastMember, CrewMember, TVShow, TVShowDetails, Season, Episode, Person } from '@/types';
 
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY ?? '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+// Genre ID mapping for TMDB discover API
+export const GENRE_IDS = {
+  action: 28,
+  comedy: 35,
+  drama: 18,
+  horror: 27,
+  romance: 10749,
+  scifi: 878,
+  thriller: 53,
+  documentary: 99,
+  animation: 16,
+  crime: 80,
+  mystery: 9648,
+  fantasy: 14,
+} as const;
+
+export type GenreKey = keyof typeof GENRE_IDS;
+
+// Reverse mapping: TMDB movie genre IDs to genre names
+const MOVIE_GENRE_ID_TO_NAME: Record<number, string> = {
+  28: 'Action',
+  12: 'Adventure',
+  16: 'Animation',
+  35: 'Comedy',
+  80: 'Crime',
+  99: 'Documentary',
+  18: 'Drama',
+  10751: 'Family',
+  14: 'Fantasy',
+  36: 'History',
+  27: 'Horror',
+  10402: 'Music',
+  9648: 'Mystery',
+  10749: 'Romance',
+  878: 'Sci-Fi',
+  10770: 'TV Movie',
+  53: 'Thriller',
+  10752: 'War',
+  37: 'Western',
+};
+
+// Reverse mapping: TMDB TV genre IDs to genre names
+const TV_GENRE_ID_TO_NAME: Record<number, string> = {
+  10759: 'Action & Adventure',
+  16: 'Animation',
+  35: 'Comedy',
+  80: 'Crime',
+  99: 'Documentary',
+  18: 'Drama',
+  10751: 'Family',
+  10762: 'Kids',
+  9648: 'Mystery',
+  10763: 'News',
+  10764: 'Reality',
+  10765: 'Sci-Fi & Fantasy',
+  10766: 'Soap',
+  10767: 'Talk',
+  10768: 'War & Politics',
+  37: 'Western',
+};
 
 // Image size variants
 export const ImageSize = {
@@ -151,6 +212,11 @@ export function getProfileImageUrl(path: string | null): string {
 // Transform TMDB movie to our Movie type
 function transformMovie(tmdbMovie: TMDBMovie, director?: string): Movie {
   const collection = tmdbMovie.belongs_to_collection;
+  // Use genres array if available (from detail endpoints), otherwise convert genre_ids (from list endpoints)
+  const genres = tmdbMovie.genres?.map((g) => g.name)
+    ?? tmdbMovie.genre_ids?.map(id => MOVIE_GENRE_ID_TO_NAME[id]).filter((g): g is string => !!g)
+    ?? [];
+
   return {
     id: tmdbMovie.id,
     title: tmdbMovie.title,
@@ -159,13 +225,14 @@ function transformMovie(tmdbMovie: TMDBMovie, director?: string): Movie {
     release_year: tmdbMovie.release_date
       ? parseInt(tmdbMovie.release_date.split('-')[0], 10)
       : 0,
-    genres: tmdbMovie.genres?.map((g) => g.name) ?? [],
+    genres,
     director: director,
     synopsis: tmdbMovie.overview,
     popularity_score: tmdbMovie.popularity,
     runtime_minutes: tmdbMovie.runtime,
     collection_id: collection?.id,
     collection_name: collection?.name,
+    rating: tmdbMovie.vote_average,
   };
 }
 
@@ -307,6 +374,11 @@ export async function getNowPlayingMovies(page: number = 1): Promise<{
 
 // Transform TMDB TV show to our TVShow type
 function transformTVShow(tmdbShow: TMDBTVShow, creator?: string): TVShow {
+  // Use genres array if available (from detail endpoints), otherwise convert genre_ids (from list endpoints)
+  const genres = tmdbShow.genres?.map((g) => g.name)
+    ?? tmdbShow.genre_ids?.map(id => TV_GENRE_ID_TO_NAME[id]).filter((g): g is string => !!g)
+    ?? [];
+
   return {
     id: tmdbShow.id,
     title: tmdbShow.name,
@@ -315,13 +387,14 @@ function transformTVShow(tmdbShow: TMDBTVShow, creator?: string): TVShow {
     release_year: tmdbShow.first_air_date
       ? parseInt(tmdbShow.first_air_date.split('-')[0], 10)
       : 0,
-    genres: tmdbShow.genres?.map((g) => g.name) ?? [],
+    genres,
     creator: creator,
     synopsis: tmdbShow.overview,
     popularity_score: tmdbShow.popularity,
     total_seasons: tmdbShow.number_of_seasons,
     total_episodes: tmdbShow.number_of_episodes,
     episode_runtime: tmdbShow.episode_run_time?.[0],
+    rating: tmdbShow.vote_average,
   };
 }
 
@@ -516,4 +589,173 @@ export async function searchAll(query: string, page: number = 1): Promise<{
     totalPages: data.total_pages,
     totalResults: data.total_results,
   };
+}
+
+// ============================================
+// DISCOVER & PERSON SEARCH FUNCTIONS
+// ============================================
+
+// Discover movies by genre
+export async function discoverMoviesByGenre(genreId: number, page: number = 1): Promise<Movie[]> {
+  const data = await tmdbFetch<TMDBSearchResponse>('/discover/movie', {
+    with_genres: genreId.toString(),
+    sort_by: 'popularity.desc',
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  return data.results.map((m) => transformMovie(m));
+}
+
+// Discover TV shows by genre
+export async function discoverTVShowsByGenre(genreId: number, page: number = 1): Promise<TVShow[]> {
+  const data = await tmdbFetch<TMDBTVSearchResponse>('/discover/tv', {
+    with_genres: genreId.toString(),
+    sort_by: 'popularity.desc',
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  return data.results.map((s) => transformTVShow(s));
+}
+
+// Discover movies by multiple genre IDs
+export async function discoverMoviesByGenres(genreIds: number[], page: number = 1): Promise<Movie[]> {
+  const data = await tmdbFetch<TMDBSearchResponse>('/discover/movie', {
+    with_genres: genreIds.join(','),
+    sort_by: 'popularity.desc',
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  return data.results.map((m) => transformMovie(m));
+}
+
+// TMDB Person types
+interface TMDBPerson {
+  id: number;
+  name: string;
+  profile_path: string | null;
+  known_for_department: string;
+  known_for?: (TMDBMovie | TMDBTVShow)[];
+}
+
+interface TMDBPersonSearchResponse {
+  page: number;
+  results: TMDBPerson[];
+  total_pages: number;
+  total_results: number;
+}
+
+interface TMDBPersonCredits {
+  cast: (TMDBMovie & { character?: string })[];
+  crew: (TMDBMovie & { job?: string })[];
+}
+
+// Transform TMDB person to our Person type
+function transformPerson(tmdbPerson: TMDBPerson): Person {
+  return {
+    id: tmdbPerson.id,
+    name: tmdbPerson.name,
+    profile_url: getProfileImageUrl(tmdbPerson.profile_path),
+    known_for_department: tmdbPerson.known_for_department,
+  };
+}
+
+// Search for people (actors/directors)
+export async function searchPeople(query: string, page: number = 1): Promise<{
+  people: Person[];
+  totalPages: number;
+  totalResults: number;
+}> {
+  if (!query.trim()) {
+    return { people: [], totalPages: 0, totalResults: 0 };
+  }
+
+  const data = await tmdbFetch<TMDBPersonSearchResponse>('/search/person', {
+    query: query.trim(),
+    page: page.toString(),
+    include_adult: 'false',
+  });
+
+  return {
+    people: data.results.map((p) => transformPerson(p)),
+    totalPages: data.total_pages,
+    totalResults: data.total_results,
+  };
+}
+
+// ============================================
+// VIDEO FUNCTIONS
+// ============================================
+
+interface TMDBVideo {
+  id: string;
+  key: string;
+  name: string;
+  site: string;
+  type: string;
+  official: boolean;
+}
+
+interface TMDBVideosResponse {
+  id: number;
+  results: TMDBVideo[];
+}
+
+// Get movie videos (trailers, teasers) - returns YouTube keys
+export async function getMovieVideos(movieId: number): Promise<{
+  trailerKey: string | null;
+  teaserKey: string | null;
+}> {
+  try {
+    const data = await tmdbFetch<TMDBVideosResponse>(`/movie/${movieId}/videos`);
+
+    // Prioritize official trailers, then any trailer, then teasers
+    const officialTrailer = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Trailer' && v.official
+    );
+    const anyTrailer = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Trailer'
+    );
+    const teaser = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Teaser'
+    );
+
+    return {
+      trailerKey: officialTrailer?.key || anyTrailer?.key || null,
+      teaserKey: teaser?.key || null,
+    };
+  } catch (error) {
+    console.error('Error fetching movie videos:', error);
+    return { trailerKey: null, teaserKey: null };
+  }
+}
+
+// Get person's movie credits (as actor or director)
+export async function getPersonMovieCredits(personId: number): Promise<Movie[]> {
+  const data = await tmdbFetch<TMDBPersonCredits>(`/person/${personId}/movie_credits`);
+
+  // Combine cast and crew (directing), remove duplicates, sort by popularity
+  const movieMap = new Map<number, TMDBMovie>();
+
+  // Add movies from cast
+  for (const movie of data.cast) {
+    if (!movieMap.has(movie.id)) {
+      movieMap.set(movie.id, movie);
+    }
+  }
+
+  // Add movies from crew (directing jobs)
+  for (const movie of data.crew) {
+    if (movie.job === 'Director' && !movieMap.has(movie.id)) {
+      movieMap.set(movie.id, movie);
+    }
+  }
+
+  const movies = Array.from(movieMap.values())
+    .sort((a, b) => b.popularity - a.popularity)
+    .slice(0, 20);
+
+  return movies.map((m) => transformMovie(m));
 }

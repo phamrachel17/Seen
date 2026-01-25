@@ -86,3 +86,41 @@ export async function getEmailByUsername(username: string): Promise<string | nul
 export function isEmail(input: string): boolean {
   return input.includes('@');
 }
+
+/**
+ * Check if an email address has been verified in auth.users
+ * Returns true if verified, false if unverified or not found
+ */
+export async function checkEmailVerified(email: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  const { data } = await supabase.rpc('check_email_verified', {
+    check_email: normalized,
+  });
+  return data === true;
+}
+
+/**
+ * Get the status of an email address
+ * Returns whether the email exists and if it's verified
+ */
+export async function getEmailStatus(email: string): Promise<{
+  exists: boolean;
+  verified: boolean;
+}> {
+  const normalized = normalizeEmail(email);
+
+  // Check if email exists in public.users
+  const { data: userData } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', normalized)
+    .maybeSingle();
+
+  if (!userData) {
+    return { exists: false, verified: false };
+  }
+
+  // Check if verified via RPC
+  const verified = await checkEmailVerified(normalized);
+  return { exists: true, verified };
+}

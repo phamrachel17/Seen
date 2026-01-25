@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -256,11 +257,7 @@ export default function ReviewDetailScreen() {
   };
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!review) {

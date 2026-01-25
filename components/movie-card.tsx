@@ -1,3 +1,4 @@
+import React from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -38,7 +39,13 @@ const CARD_SIZES = {
   },
 };
 
-export function MovieCard({ movie, size = 'small', showInfo = true, onPress, contentType }: MovieCardProps) {
+export const MovieCard = React.memo(function MovieCard({
+  movie,
+  size = 'small',
+  showInfo = true,
+  onPress,
+  contentType,
+}: MovieCardProps) {
   const router = useRouter();
   const cardSize = CARD_SIZES[size];
 
@@ -90,7 +97,7 @@ export function MovieCard({ movie, size = 'small', showInfo = true, onPress, con
       )}
     </Pressable>
   );
-}
+});
 
 // Grid variant for displaying multiple movies/TV shows
 interface MovieGridProps {

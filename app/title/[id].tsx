@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Dimensions,
   Animated,
   StatusBar,
   RefreshControl,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -76,6 +76,7 @@ export default function TitleDetailScreen() {
   const [inProgressActivity, setInProgressActivity] = useState<Activity | null>(null);
   const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
+  const [totalRankingsCount, setTotalRankingsCount] = useState<number>(0);
   const [friendsActivities, setFriendsActivities] = useState<Activity[]>([]);
 
   // Community rating
@@ -192,6 +193,7 @@ export default function TitleDetailScreen() {
   };
 
   const loadUserRanking = async (tmdbId: number, contentType: ContentType): Promise<Ranking | null> => {
+    // Fetch user's ranking for this content
     const { data } = await supabase
       .from('rankings')
       .select('*')
@@ -199,6 +201,16 @@ export default function TitleDetailScreen() {
       .eq('movie_id', tmdbId)
       .eq('content_type', contentType)
       .single();
+
+    // Also fetch total count of rankings for this content type
+    if (data) {
+      const { count } = await supabase
+        .from('rankings')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user?.id)
+        .eq('content_type', contentType);
+      setTotalRankingsCount(count || 0);
+    }
 
     return data;
   };
@@ -290,14 +302,22 @@ export default function TitleDetailScreen() {
     }
   };
 
-  const openLogActivity = (editDirectly?: boolean, editInProgress?: boolean) => {
+  const openLogActivity = (editDirectly?: boolean, editInProgress?: boolean, editDetailsOnly?: boolean) => {
     if (content) {
       const params = new URLSearchParams();
       if (editDirectly) params.append('editMode', 'true');
       if (editInProgress) params.append('editInProgress', 'true');
+      if (editDetailsOnly) params.append('editDetailsOnly', 'true');
       const query = params.toString() ? `?${params.toString()}` : '';
       router.push(`/log-activity/${content.id}${query}`);
     }
+  };
+
+  // Helper for score badge color
+  const getScoreColor = (score: number) => {
+    if (score >= 8.0) return Colors.stamp;
+    if (score >= 6.0) return Colors.settledTea;
+    return Colors.textMuted;
   };
 
   // Computed values
@@ -342,11 +362,7 @@ export default function TitleDetailScreen() {
   });
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!details && !content) {
@@ -574,18 +590,45 @@ export default function TitleDetailScreen() {
             <View style={styles.yourTakeSection}>
               <View style={styles.yourTakeHeader}>
                 <Text style={styles.sectionLabel}>Your Take:</Text>
-                {userRanking && (
-                  <View style={styles.rankingBadge}>
-                    <Text style={styles.rankingBadgeText}>#{userRanking.rank_position}</Text>
-                  </View>
-                )}
               </View>
+
+              {/* Ranking Info - show when item is ranked (ABOVE the review card) */}
+              {userRanking && (
+                <View style={styles.rankingInfoContainer}>
+                  <View style={styles.rankingInfoRow}>
+                    {/* Score Badge */}
+                    <View style={[
+                      styles.scoreBadge,
+                      { borderColor: getScoreColor(userRanking.display_score) }
+                    ]}>
+                      <Text style={[
+                        styles.scoreBadgeText,
+                        { color: getScoreColor(userRanking.display_score) }
+                      ]}>
+                        {userRanking.display_score.toFixed(1)}
+                      </Text>
+                    </View>
+
+                    {/* Position and Context */}
+                    <View style={styles.rankingTextContainer}>
+                      <Text style={styles.rankingPositionText}>
+                        #{userRanking.rank_position}
+                        {totalRankingsCount > 0 && ` of ${totalRankingsCount}`}
+                      </Text>
+                      <Text style={styles.rankingContextText}>
+                        in your {userRanking.content_type === 'movie' ? 'Movies' : 'TV Shows'} rankings
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
               <Pressable
                 style={({ pressed }) => [
                   styles.activityCard,
                   pressed && styles.cardPressed,
                 ]}
-                onPress={() => openLogActivity(true)}
+                onPress={() => openLogActivity(false, false, true)}
               >
                 <View style={styles.activityHeader}>
                   <View style={styles.starsRow}>
@@ -1049,7 +1092,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   sectionLabel: {
-    fontFamily: Fonts.serifSemiBold,
+    fontFamily: Fonts.serifExtraBold,
     fontSize: FontSizes.lg,
     color: Colors.text,
   },
@@ -1086,6 +1129,40 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes.sm,
     color: Colors.white,
+  },
+  rankingInfoContainer: {
+    marginBottom: Spacing.md,
+  },
+  rankingInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  scoreBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  scoreBadgeText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+  },
+  rankingTextContainer: {
+    flex: 1,
+  },
+  rankingPositionText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
+  rankingContextText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
   },
   activityCard: {
     paddingVertical: Spacing.lg,

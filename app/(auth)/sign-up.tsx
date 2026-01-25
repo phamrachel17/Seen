@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,9 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { checkUsernameAvailable, checkEmailAvailable } from '@/lib/validation';
+import { checkUsernameAvailable, getEmailStatus } from '@/lib/validation';
+
+const RESEND_COOLDOWN_MS = 60000; // 60 seconds
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -37,6 +39,21 @@ export default function SignUpScreen() {
   const [success, setSuccess] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
+  const [lastResendTime, setLastResendTime] = useState<number>(0);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  // Cooldown timer for resend button
+  useEffect(() => {
+    if (lastResendTime === 0) return;
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, RESEND_COOLDOWN_MS - (Date.now() - lastResendTime));
+      setCooldownRemaining(remaining);
+      if (remaining === 0) clearInterval(interval);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [lastResendTime]);
 
   const handleSignUp = async () => {
     // Clear all errors
@@ -69,9 +86,9 @@ export default function SignUpScreen() {
     setLoading(true);
 
     // Pre-flight duplicate checking (in parallel)
-    const [isUsernameAvailable, isEmailAvailable] = await Promise.all([
+    const [isUsernameAvailable, emailStatus] = await Promise.all([
       checkUsernameAvailable(trimmedUsername),
-      checkEmailAvailable(trimmedEmail),
+      getEmailStatus(trimmedEmail),
     ]);
 
     let hasErrors = false;
@@ -81,9 +98,27 @@ export default function SignUpScreen() {
       hasErrors = true;
     }
 
-    if (!isEmailAvailable) {
-      setEmailError('An account with this email already exists');
-      hasErrors = true;
+    if (emailStatus.exists) {
+      if (emailStatus.verified) {
+        // Email exists AND is verified - truly taken
+        setEmailError('An account with this email already exists');
+        hasErrors = true;
+      } else {
+        // Email exists but NOT verified - resend verification email
+        try {
+          await supabase.auth.resend({
+            type: 'signup',
+            email: trimmedEmail,
+          });
+          setResendSuccess(true);
+          setLastResendTime(Date.now());
+          setSuccess(true);
+        } catch (e) {
+          setGeneralError('Failed to resend verification email. Please try again.');
+        }
+        setLoading(false);
+        return;
+      }
     }
 
     if (hasErrors) {
@@ -104,6 +139,8 @@ export default function SignUpScreen() {
   };
 
   const handleResendEmail = async () => {
+    if (cooldownRemaining > 0) return;
+
     setResending(true);
     setResendSuccess(false);
     try {
@@ -113,11 +150,14 @@ export default function SignUpScreen() {
       });
       if (!error) {
         setResendSuccess(true);
+        setLastResendTime(Date.now());
       }
     } finally {
       setResending(false);
     }
   };
+
+  const cooldownSeconds = Math.ceil(cooldownRemaining / 1000);
 
   if (success) {
     return (
@@ -126,7 +166,9 @@ export default function SignUpScreen() {
           <Text style={styles.title}>Seen</Text>
           <Text style={styles.successTitle}>Check your email</Text>
           <Text style={styles.successText}>
-            We sent a confirmation link to {email}. Please verify your email, then sign in.
+            {resendSuccess
+              ? `We resent a confirmation link to ${email}. Please verify your email, then sign in.`
+              : `We sent a confirmation link to ${email}. Please verify your email, then sign in.`}
           </Text>
           <Pressable
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
@@ -138,13 +180,15 @@ export default function SignUpScreen() {
             style={({ pressed }) => [
               styles.resendButton,
               pressed && styles.buttonPressed,
-              resending && styles.buttonDisabled,
+              (resending || cooldownRemaining > 0) && styles.buttonDisabled,
             ]}
             onPress={handleResendEmail}
-            disabled={resending}
+            disabled={resending || cooldownRemaining > 0}
           >
             {resending ? (
               <ActivityIndicator size="small" color={Colors.textMuted} />
+            ) : cooldownRemaining > 0 ? (
+              <Text style={styles.resendButtonText}>Resend in {cooldownSeconds}s</Text>
             ) : (
               <Text style={styles.resendButtonText}>
                 {resendSuccess ? 'Email sent!' : "Didn't receive it? Resend"}
@@ -394,9 +438,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   button: {
-    backgroundColor: Colors.handwriting,
+    backgroundColor: Colors.stamp,
     paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     marginTop: Spacing.lg,
   },
@@ -408,10 +452,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.sm,
-    color: Colors.white,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
+    fontSize: FontSizes.md,
+    color: Colors.paper,
   },
   switchText: {
     fontFamily: Fonts.sans,

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { getEmailByUsername, normalizeEmail } from '@/lib/validation';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -37,7 +38,33 @@ export default function SignInScreen() {
     const { error: signInError } = await signIn(emailOrUsername.trim(), password);
 
     if (signInError) {
-      setError(signInError.message);
+      // Check if it's an unverified email error
+      if (signInError.message.includes('Email not confirmed')) {
+        // Determine the email to pass to verify screen
+        let email = emailOrUsername.trim();
+        if (!email.includes('@')) {
+          // It was a username, need to look up email
+          const foundEmail = await getEmailByUsername(email);
+          if (!foundEmail) {
+            // Username not found in database - show error instead of redirecting
+            setError('Username not found. Please check and try again.');
+            setLoading(false);
+            return;
+          }
+          email = foundEmail;
+        } else {
+          // Normalize email for consistency
+          email = normalizeEmail(email);
+        }
+
+        // Redirect to verify email screen
+        router.push({
+          pathname: '/(auth)/verify-email',
+          params: { email },
+        });
+      } else {
+        setError(signInError.message);
+      }
       setLoading(false);
     }
   };
@@ -198,9 +225,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   button: {
-    backgroundColor: Colors.handwriting,
+    backgroundColor: Colors.stamp,
     paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     marginTop: Spacing.lg,
   },
@@ -212,9 +239,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.sm,
-    color: Colors.white,
-    letterSpacing: 1.5,
+    fontSize: FontSizes.md,
+    color: Colors.paper,
   },
   switchText: {
     fontFamily: Fonts.sans,

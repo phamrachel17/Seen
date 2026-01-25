@@ -4,11 +4,11 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Dimensions,
   Animated,
   StatusBar,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -192,11 +192,7 @@ export default function MovieDetailScreen() {
   });
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   if (!movie) {

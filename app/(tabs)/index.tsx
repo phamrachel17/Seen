@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,8 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
@@ -16,8 +16,7 @@ import { ActivityFeedCard } from '@/components/activity-feed-card';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { getUnreadNotificationCount } from '@/lib/social';
-import { getFeedActivities } from '@/lib/activity';
-import { getFollowingIds } from '@/lib/follows';
+import { useFeed } from '@/lib/hooks/useFeed';
 import { Activity } from '@/types';
 
 export default function FeedScreen() {
@@ -25,18 +24,21 @@ export default function FeedScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  // Use cached feed hook
+  const {
+    activities,
+    isLoading,
+    isRefreshing,
+    refresh: refreshFeed,
+  } = useFeed(user?.id);
+
   const [unreadCount, setUnreadCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [displayName, setDisplayName] = useState<string>('');
 
-  const loadFeed = useCallback(async () => {
-    if (!user) {
-      setIsLoading(false);
-      return;
-    }
+  // Load profile data and notification count
+  const loadExtras = useCallback(async () => {
+    if (!user) return;
 
     try {
       // Fetch user profile for display name
@@ -52,38 +54,37 @@ export default function FeedScreen() {
         setDisplayName(name.split(' ')[0]);
       }
 
-      // Get users the current user is following
-      const followingIds = await getFollowingIds(user.id);
-
-      // Include current user's activities in feed
-      const feedUserIds = [user.id, ...followingIds];
-
-      // Fetch activities from the user and people they follow
-      const feedActivities = await getFeedActivities(user.id, feedUserIds, 50);
-      setActivities(feedActivities);
-
       // Load unread notification count
       const count = await getUnreadNotificationCount(user.id);
       setUnreadCount(count);
     } catch (error) {
-      console.error('Error loading feed:', error);
-    } finally {
-      setIsLoading(false);
+      console.error('Error loading extras:', error);
     }
   }, [user]);
 
+  // Load extras on mount and when user changes
+  useEffect(() => {
+    loadExtras();
+  }, [loadExtras]);
+
   useFocusEffect(
     useCallback(() => {
-      loadFeed();
+      // Refresh notification count on focus
+      if (user) {
+        getUnreadNotificationCount(user.id).then(setUnreadCount);
+      }
+      // Refresh feed on focus (will use cache if still valid, fetch if invalidated)
+      refreshFeed();
       // Increment refreshKey to trigger card interaction reloads
       setRefreshKey((prev) => prev + 1);
-    }, [loadFeed])
+      // Note: refreshFeed intentionally excluded from deps to prevent infinite loop
+      // (refreshFeed reference changes when offset changes, which happens on every refresh)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user])
   );
 
   const onRefresh = async () => {
-    setIsRefreshing(true);
-    await loadFeed();
-    setIsRefreshing(false);
+    await Promise.all([refreshFeed(), loadExtras()]);
   };
 
   const navigateToNotifications = () => {
@@ -140,9 +141,7 @@ export default function FeedScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.stamp} />
-        </View>
+        <LoadingScreen />
       ) : (
         <FlatList
           data={activities}
@@ -223,11 +222,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: 10,
     color: Colors.white,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   listContent: {
     paddingHorizontal: Spacing.xl,

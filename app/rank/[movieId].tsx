@@ -6,28 +6,36 @@ import {
   Pressable,
   ActivityIndicator,
   Dimensions,
+  Modal,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { getMovieDetails } from '@/lib/tmdb';
+import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
 import {
   getUserRankingsWithRatings,
   initializeRankingStateWithTier,
   getCurrentComparison,
   processComparison,
   saveRanking,
+  removeRanking,
   RankingState,
   Comparison,
   RankedMovie,
 } from '@/lib/ranking';
 import { useAuth } from '@/lib/auth-context';
-import { Movie, ContentType } from '@/types';
+import { useCache } from '@/lib/cache-context';
+import { getUserCompletedActivity } from '@/lib/activity';
+import { supabase } from '@/lib/supabase';
+import { Movie, ContentType, Activity } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.lg) / 2;
+// Account for: horizontal padding (Spacing.xl each side), VS divider (40px), and gaps (Spacing.md * 2)
+const VS_DIVIDER_WIDTH = 40;
+const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - VS_DIVIDER_WIDTH - Spacing.md * 2) / 2;
 const CARD_HEIGHT = CARD_WIDTH * 1.5;
 
 // Star display component
@@ -51,14 +59,16 @@ function StarRating({ rating, size = 12 }: { rating: number; size?: number }) {
 }
 
 export default function RankingModal() {
-  const { movieId, starRating: starRatingParam, contentType: contentTypeParam } = useLocalSearchParams<{
+  const { movieId, starRating: starRatingParam, contentType: contentTypeParam, replaceExisting } = useLocalSearchParams<{
     movieId: string;
     starRating?: string;
     contentType?: ContentType;
+    replaceExisting?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { invalidate } = useCache();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,10 +76,19 @@ export default function RankingModal() {
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [starRating, setStarRating] = useState<number>(3);
   const [contentType, setContentType] = useState<ContentType>('movie');
+  const [detailPopup, setDetailPopup] = useState<{
+    visible: boolean;
+    movie: RankedMovie | Movie | null;
+    activity: Activity | null;
+    isNew: boolean;
+    totalCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (movieId && user) {
+      console.log(`[Rank Screen] URL params: starRatingParam=${starRatingParam}, contentTypeParam=${contentTypeParam}`);
       const rating = starRatingParam ? parseInt(starRatingParam, 10) : 3;
+      console.log(`[Rank Screen] Parsed rating=${rating}`);
       const type = contentTypeParam || 'movie';
       setStarRating(rating);
       setContentType(type);
@@ -80,10 +99,13 @@ export default function RankingModal() {
 
   const initializeRanking = async (id: number, rating: number, type: ContentType) => {
     try {
+      console.log(`[Rank Screen] initializeRanking: id=${id}, rating=${rating}, type=${type}`);
       setIsLoading(true);
 
-      // Fetch the movie to rank
-      const movie = await getMovieDetails(id);
+      // Fetch the content to rank (movie or TV show)
+      const movie = type === 'tv'
+        ? await getTVShowDetails(id)
+        : await getMovieDetails(id);
 
       // Fetch user's existing rankings with star ratings for this content type
       const existingRankings = await getUserRankingsWithRatings(user!.id, type);
@@ -120,10 +142,19 @@ export default function RankingModal() {
   };
 
   const finishRanking = async (state: RankingState, rating: number, type: ContentType) => {
+    console.log(`[Rank Screen] finishRanking: tierPosition=${state.tierPosition}, rating=${rating}, state.starRating=${state.starRating}`);
     setIsSaving(true);
 
     try {
+      // If replacing an existing ranking (rating changed), remove the old one first
+      // This is done here (not in review screen) to prevent data loss if navigation failed
+      if (replaceExisting === 'true') {
+        await removeRanking(user!.id, state.newMovie.id, type);
+      }
+
       await saveRanking(user!.id, state.newMovie, state.tierPosition, rating, type);
+      // Invalidate caches on successful ranking creation
+      invalidate('ranking_create', user!.id);
       // Navigate to lists quickly
       setTimeout(() => {
         router.replace('/(tabs)/lists');
@@ -134,16 +165,63 @@ export default function RankingModal() {
     }
   };
 
+  // Helper for score badge color
+  const getScoreColor = (score: number) => {
+    if (score >= 8.0) return Colors.stamp;
+    if (score >= 6.0) return Colors.settledTea;
+    return Colors.textMuted;
+  };
+
+  // Handle long-press to show rating details
+  const handleLongPress = async (movie: RankedMovie | Movie, isNew: boolean) => {
+    if (isNew) {
+      // New movie - just show the star rating being given
+      setDetailPopup({
+        visible: true,
+        movie,
+        activity: null,
+        isNew: true,
+        totalCount: 0,
+      });
+      return;
+    }
+
+    // Existing movie - fetch activity data
+    const rankedMovie = movie as RankedMovie;
+
+    // Get content_id from content table
+    const { data: contentData } = await supabase
+      .from('content')
+      .select('id')
+      .eq('tmdb_id', rankedMovie.id)
+      .single();
+
+    let activity = null;
+    if (contentData) {
+      activity = await getUserCompletedActivity(user!.id, contentData.id);
+    }
+
+    // Get total count for context
+    const { count } = await supabase
+      .from('rankings')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user!.id)
+      .eq('content_type', contentType);
+
+    setDetailPopup({
+      visible: true,
+      movie: rankedMovie,
+      activity,
+      isNew: false,
+      totalCount: count || 0,
+    });
+  };
+
   // Get tier movie count for context
   const tierMovieCount = rankingState?.tierMovies.length || 0;
 
   if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-        <Text style={styles.loadingText}>Loading your rankings...</Text>
-      </View>
-    );
+    return <LoadingScreen message="Loading your rankings..." />;
   }
 
   // Show completion state
@@ -205,24 +283,31 @@ export default function RankingModal() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Context */}
-      <View style={styles.tierContextHeader}>
-        <Text style={styles.tierContextText}>
-          Ranking among your {rankingState?.tierMovies.length || 0} {starRating}-star films
-        </Text>
+      {/* Header Section - Fixed at top */}
+      <View style={styles.headerSection}>
+        {/* Context */}
+        <View style={styles.tierContextHeader}>
+          <Text style={styles.tierContextText}>
+            Comparing with <Text style={styles.tierCountText}>{rankingState?.tierMovies.length || 0}</Text> other {'★'.repeat(starRating)} {(rankingState?.tierMovies.length || 0) === 1 ? 'film' : 'films'}
+          </Text>
+        </View>
+
+        {/* Question */}
+        <View style={styles.questionContainer}>
+          <Text style={styles.questionText}>Which do you prefer?</Text>
+        </View>
       </View>
 
-      {/* Question */}
-      <View style={styles.questionContainer}>
-        <Text style={styles.questionText}>Which do you prefer?</Text>
-      </View>
-
-      {/* Comparison Cards */}
-      <View style={styles.comparisonContainer}>
+      {/* Center Section - Cards centered in remaining space */}
+      <View style={styles.centerSection}>
+        {/* Comparison Cards */}
+        <View style={styles.comparisonContainer}>
         {/* New Movie (A) */}
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
           onPress={() => handleChoice(true)}
+          onLongPress={() => handleLongPress(comparison.movieA, true)}
+          delayLongPress={400}
         >
           {comparison.movieA.poster_url ? (
             <Image
@@ -255,6 +340,8 @@ export default function RankingModal() {
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
           onPress={() => handleChoice(false)}
+          onLongPress={() => handleLongPress(comparison.movieB, false)}
+          delayLongPress={400}
         >
           {comparison.movieB.poster_url ? (
             <Image
@@ -279,14 +366,85 @@ export default function RankingModal() {
             </Text>
           </View>
         </Pressable>
+        </View>
+
+        {/* Instructions */}
+        <View style={styles.instructionsContainer}>
+          <Text style={styles.instructionsText}>
+            Tap the film you like more • Hold for details
+          </Text>
+        </View>
       </View>
 
-      {/* Instructions */}
-      <View style={styles.instructionsContainer}>
-        <Text style={styles.instructionsText}>
-          Tap the film you like more
-        </Text>
-      </View>
+      {/* Rating Detail Popup */}
+      <Modal
+        visible={detailPopup?.visible || false}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDetailPopup(null)}
+      >
+        <Pressable
+          style={styles.popupOverlay}
+          onPress={() => setDetailPopup(null)}
+        >
+          <View style={styles.popupContent}>
+            {detailPopup && (
+              <>
+                <Text style={styles.popupTitle}>
+                  {detailPopup.movie?.title}
+                </Text>
+
+                {detailPopup.isNew ? (
+                  <View style={styles.popupSection}>
+                    <Text style={styles.popupLabel}>Your new rating:</Text>
+                    <StarRating rating={starRating} size={20} />
+                  </View>
+                ) : (
+                  <>
+                    {/* Star Rating */}
+                    <View style={styles.popupSection}>
+                      <StarRating
+                        rating={(detailPopup.movie as RankedMovie).star_rating}
+                        size={20}
+                      />
+                    </View>
+
+                    {/* Score & Position */}
+                    <View style={styles.popupScoreRow}>
+                      <View style={[
+                        styles.popupScoreBadge,
+                        { borderColor: getScoreColor((detailPopup.movie as RankedMovie).ranking.display_score) }
+                      ]}>
+                        <Text style={[
+                          styles.popupScoreText,
+                          { color: getScoreColor((detailPopup.movie as RankedMovie).ranking.display_score) }
+                        ]}>
+                          {(detailPopup.movie as RankedMovie).ranking.display_score.toFixed(1)}
+                        </Text>
+                      </View>
+                      <Text style={styles.popupPositionText}>
+                        #{(detailPopup.movie as RankedMovie).ranking.rank_position}
+                        {detailPopup.totalCount > 0 && ` of ${detailPopup.totalCount}`}
+                      </Text>
+                    </View>
+
+                    {/* Review Text */}
+                    {detailPopup.activity?.review_text && (
+                      <View style={styles.popupSection}>
+                        <Text style={styles.popupReviewText}>
+                          "{detailPopup.activity.review_text}"
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                <Text style={styles.popupHint}>Tap anywhere to close</Text>
+              </>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -350,14 +508,25 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
+  headerSection: {
+    alignItems: 'center',
+    paddingTop: Spacing.md,
+  },
+  centerSection: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 80,
+  },
   tierContextHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
     backgroundColor: Colors.cardBackground,
-    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.md,
     borderRadius: BorderRadius.sm,
   },
   tierContextText: {
@@ -365,9 +534,12 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
   },
+  tierCountText: {
+    fontFamily: Fonts.sansSemiBold,
+    color: Colors.text,
+  },
   questionContainer: {
     alignItems: 'center',
-    paddingVertical: Spacing.xl,
   },
   questionText: {
     fontFamily: Fonts.serifItalic,
@@ -378,8 +550,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: Spacing.md,
     paddingHorizontal: Spacing.xl,
-    flex: 1,
   },
   card: {
     width: CARD_WIDTH,
@@ -456,7 +628,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   vsDivider: {
-    width: 40,
+    width: VS_DIVIDER_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -534,5 +706,75 @@ const styles = StyleSheet.create({
   },
   starEmpty: {
     color: Colors.dust,
+  },
+  popupOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  popupContent: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    width: '100%',
+    maxWidth: 320,
+  },
+  popupTitle: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes.xl,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+  },
+  popupSection: {
+    marginBottom: Spacing.md,
+    alignItems: 'center',
+  },
+  popupLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    marginBottom: Spacing.xs,
+  },
+  popupScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  popupScoreBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  popupScoreText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+  },
+  popupPositionText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.lg,
+    color: Colors.text,
+  },
+  popupReviewText: {
+    fontFamily: Fonts.serifItalic,
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: FontSizes.md * 1.5,
+  },
+  popupHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: Spacing.lg,
   },
 });

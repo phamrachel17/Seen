@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { normalizeEmail, isEmail, getEmailByUsername } from './validation';
+import { cache } from './cache';
 
 interface AuthContextType {
   session: Session | null;
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    cache.clear(); // Clear all cached data on logout
     await supabase.auth.signOut();
   };
 
@@ -101,6 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         return { error: new Error(error.message) };
       }
+
+      // Clear all cached data after successful deletion
+      cache.clear();
 
       // Clear local session state after successful deletion
       setSession(null);

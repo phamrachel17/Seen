@@ -6,8 +6,8 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -83,8 +83,10 @@ export default function NotificationsScreen() {
       case 'like':
       case 'comment':
       case 'tagged':
-        if (notification.review_id) {
-          router.push(`/review-detail/${notification.review_id}`);
+        // Navigate to title detail page using activity content info
+        if (notification.activity?.content) {
+          const { tmdb_id, content_type } = notification.activity.content;
+          router.push(`/title/${tmdb_id}?type=${content_type}` as any);
         }
         break;
       case 'follow':
@@ -112,20 +114,21 @@ export default function NotificationsScreen() {
 
   const getNotificationText = (notification: Notification) => {
     const actorName = notification.actor?.display_name || notification.actor?.username || 'Someone';
-    const movieTitle = notification.review?.movies?.title;
+    // Use activity.content.title (new) or fall back to review.movies.title (legacy)
+    const contentTitle = notification.activity?.content?.title || notification.review?.movies?.title;
 
     switch (notification.type) {
       case 'like':
-        return movieTitle
-          ? `${actorName} liked your review of ${movieTitle}`
+        return contentTitle
+          ? `${actorName} liked your review of ${contentTitle}`
           : `${actorName} liked your review`;
       case 'comment':
-        return movieTitle
-          ? `${actorName} commented on your review of ${movieTitle}`
+        return contentTitle
+          ? `${actorName} commented on your review of ${contentTitle}`
           : `${actorName} commented on your review`;
       case 'tagged':
-        return movieTitle
-          ? `${actorName} tagged you in a review of ${movieTitle}`
+        return contentTitle
+          ? `${actorName} tagged you in a review of ${contentTitle}`
           : `${actorName} tagged you in a review`;
       case 'follow':
         return `${actorName} started following you`;
@@ -201,9 +204,9 @@ export default function NotificationsScreen() {
         <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
       </View>
 
-      {item.review?.movies?.poster_url && (
+      {(item.activity?.content?.poster_url || item.review?.movies?.poster_url) && (
         <Image
-          source={{ uri: item.review.movies.poster_url }}
+          source={{ uri: item.activity?.content?.poster_url || item.review?.movies?.poster_url }}
           style={styles.movieThumb}
           contentFit="cover"
         />
@@ -245,9 +248,7 @@ export default function NotificationsScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.stamp} />
-        </View>
+        <LoadingScreen />
       ) : (
         <FlatList
           data={notifications}
@@ -305,11 +306,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.stamp,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   listContent: {
     flexGrow: 1,

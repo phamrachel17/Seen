@@ -6,7 +6,34 @@ import { createActivity } from './activity';
 // Movie with ranking and review data
 export interface RankedMovie extends Movie {
   ranking: Ranking;
-  star_rating: number;
+  star_rating: number | null;  // null indicates missing data (not 0 stars)
+}
+
+// Database row type for rankings query result
+// Note: Supabase returns foreign key relations as single objects, not arrays
+interface RankingRowRaw {
+  id: string;
+  user_id: string;
+  movie_id: number;
+  content_type: ContentType;
+  rank_position: number;
+  display_score: number;
+  created_at: string;
+  updated_at: string;
+  movies: Movie | null;  // FK relation returns single object, not array
+}
+
+// Normalized ranking row after extracting the first movie
+interface RankingRow {
+  id: string;
+  user_id: string;
+  movie_id: number;
+  content_type: ContentType;
+  rank_position: number;
+  display_score: number;
+  created_at: string;
+  updated_at: string;
+  movie: Movie | null;
 }
 
 // Represents a comparison during ranking
@@ -33,7 +60,90 @@ export interface RankingState {
   finalPosition: number;         // Global position across all tiers
 }
 
-// Scoring weights for comparison selection
+// ============================================
+// STAR RATING SCORE BANDS (Soft Guidelines)
+// ============================================
+// These define the natural score ranges for each star rating.
+// Scores are NOT forced to normalize - they reflect the star rating.
+
+const STAR_SCORE_BANDS = {
+  5: { min: 9.5, max: 10.0, default: 9.75 },
+  4: { min: 8.0, max: 9.4, default: 8.7 },
+  3: { min: 6.0, max: 7.9, default: 7.0 },
+  2: { min: 4.0, max: 5.9, default: 5.0 },
+  1: { min: 1.0, max: 3.9, default: 2.5 },
+} as const;
+
+/**
+ * Get the score band boundaries for a star rating
+ */
+function getScoreBandForStar(starRating: number): { min: number; max: number; default: number } {
+  return STAR_SCORE_BANDS[starRating as keyof typeof STAR_SCORE_BANDS] ?? STAR_SCORE_BANDS[3];
+}
+
+/**
+ * Get the default score for a star rating (used for first item in tier)
+ */
+function getDefaultScoreForStar(starRating: number): number {
+  return getScoreBandForStar(starRating).default;
+}
+
+/**
+ * Determine the minimum star rating that matches a given score
+ * Used for auto-promotion when reordering
+ */
+function getMinStarForScore(score: number): number {
+  if (score >= 9.5) return 5;
+  if (score >= 8.0) return 4;
+  if (score >= 6.0) return 3;
+  if (score >= 4.0) return 2;
+  return 1;
+}
+
+/**
+ * Calculate score for a new item based on its position and neighbors.
+ * Does NOT normalize entire list - only calculates appropriate score for insertion point.
+ * This is the core of the "intuitive" scoring system.
+ */
+function calculateNeighborAwareScore(
+  globalPosition: number,
+  allRankings: RankedMovie[],
+  starRating: number
+): number {
+  const band = getScoreBandForStar(starRating);
+
+  // If no existing rankings, this is the first movie - give it the MAX for its tier
+  if (allRankings.length === 0) {
+    return band.max;
+  }
+
+  // Get neighbors based on global position (rankings are sorted by rank_position)
+  const aboveItem = allRankings.find(r => r.ranking.rank_position === globalPosition - 1);
+  const belowItem = allRankings.find(r => r.ranking.rank_position === globalPosition);
+
+  let score: number;
+
+  if (!aboveItem && belowItem) {
+    // Inserting at TOP of list - this is the new #1, give it the MAX
+    score = band.max;
+  } else if (aboveItem && !belowItem) {
+    // Inserting at bottom - score slightly below the item above, but within band
+    score = Math.max(aboveItem.ranking.display_score - 0.3, band.min);
+  } else if (aboveItem && belowItem) {
+    // Inserting between two items - use midpoint
+    score = (aboveItem.ranking.display_score + belowItem.ranking.display_score) / 2;
+  } else {
+    // First item in list - give it the MAX for its tier
+    score = band.max;
+  }
+
+  // Strict clamp to band boundaries
+  score = Math.max(band.min, Math.min(band.max, score));
+
+  return Number(score.toFixed(1));
+}
+
+// Scoring weights for comparison selection (similarity-based)
 const SCORE_WEIGHTS = {
   GENRE_MATCH: 3,
   SAME_DIRECTOR: 5,
@@ -43,63 +153,6 @@ const SCORE_WEIGHTS = {
   BUDGET_TIER: 2,
   SAME_FRANCHISE: 10,
 } as const;
-
-/**
- * Map star rating to display score band for comparison candidate selection.
- * Uses display_score (which reflects manual reordering) instead of static star_rating.
- */
-function getScoreBandForStarRating(starRating: number): { min: number; max: number } {
-  switch (starRating) {
-    case 5: return { min: 8.0, max: 10.0 };
-    case 4: return { min: 6.0, max: 7.9 };
-    case 3: return { min: 4.0, max: 5.9 };
-    case 2: return { min: 2.0, max: 3.9 };
-    case 1: return { min: 1.0, max: 1.9 };
-    default: return { min: 4.0, max: 5.9 }; // Default to 3★ band
-  }
-}
-
-/**
- * Calculate display score from global position (1-indexed)
- * Rank #1 = 10.0, last rank = 1.0, linear interpolation between
- */
-export function calculateDisplayScore(position: number, totalCount: number): number {
-  if (totalCount <= 1) return 10.0;
-  const score = 10.0 - ((position - 1) / (totalCount - 1)) * 9.0;
-  return Number(score.toFixed(1));
-}
-
-/**
- * Recalculate display scores for all rankings of a user's content type
- * Called after any reordering or new ranking insertion
- */
-export async function recalculateAllScores(
-  userId: string,
-  contentType: ContentType
-): Promise<void> {
-  const { data: rankings, error } = await supabase
-    .from('rankings')
-    .select('id, rank_position')
-    .eq('user_id', userId)
-    .eq('content_type', contentType)
-    .order('rank_position', { ascending: true });
-
-  if (error || !rankings || rankings.length === 0) return;
-
-  const total = rankings.length;
-  for (let i = 0; i < rankings.length; i++) {
-    const position = i + 1;
-    const score = calculateDisplayScore(position, total);
-    await supabase
-      .from('rankings')
-      .update({
-        display_score: score,
-        rank_position: position,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', rankings[i].id);
-  }
-}
 
 /**
  * Calculate similarity score between two movies for smarter comparison selection
@@ -172,11 +225,12 @@ export async function getUserRankingsWithRatings(
   contentType: ContentType = 'movie'
 ): Promise<RankedMovie[]> {
   // Fetch rankings with movies, filtered by content_type
+  // Select only needed columns to reduce payload size
   const { data: rankingsData, error: rankingsError } = await supabase
     .from('rankings')
     .select(`
-      *,
-      movies (*)
+      id, user_id, movie_id, content_type, rank_position, display_score, created_at, updated_at,
+      movies (id, title, poster_url, backdrop_url, release_year, genres, director, synopsis, runtime_minutes, popularity_score, collection_id, collection_name)
     `)
     .eq('user_id', userId)
     .eq('content_type', contentType)
@@ -187,12 +241,69 @@ export async function getUserRankingsWithRatings(
     return [];
   }
 
+  // If empty, try once more after a short delay (network race condition workaround)
   if (!rankingsData || rankingsData.length === 0) {
-    return [];
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    const { data: retryData, error: retryError } = await supabase
+      .from('rankings')
+      .select(`
+        id, user_id, movie_id, content_type, rank_position, display_score, created_at, updated_at,
+        movies (id, title, poster_url, backdrop_url, release_year, genres, director, synopsis, runtime_minutes, popularity_score, collection_id, collection_name)
+      `)
+      .eq('user_id', userId)
+      .eq('content_type', contentType)
+      .order('rank_position', { ascending: true });
+
+    if (retryError || !retryData || retryData.length === 0) {
+      return [];
+    }
+
+    // Use retry data instead
+    const rawRetryData = retryData as RankingRowRaw[];
+    const typedRetryData: RankingRow[] = rawRetryData.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      movie_id: r.movie_id,
+      content_type: r.content_type,
+      rank_position: r.rank_position,
+      display_score: r.display_score,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      movie: r.movies ?? null,  // FK returns single object, not array
+    }));
+
+    // Continue with retry data
+    return processRankingsData(typedRetryData, userId);
   }
 
+  // Cast and normalize the raw data (Supabase returns FK as single object)
+  const rawData = rankingsData as RankingRowRaw[];
+  const typedRankingsData: RankingRow[] = rawData.map((r) => ({
+    id: r.id,
+    user_id: r.user_id,
+    movie_id: r.movie_id,
+    content_type: r.content_type,
+    rank_position: r.rank_position,
+    display_score: r.display_score,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    movie: r.movies ?? null,  // FK returns single object, not array
+  }));
+
+  return processRankingsData(typedRankingsData, userId);
+}
+
+/**
+ * Helper function to process rankings data and fetch star ratings
+ * Extracted to support retry logic
+ */
+async function processRankingsData(
+  typedRankingsData: RankingRow[],
+  userId: string
+): Promise<RankedMovie[]> {
   // Get TMDB IDs from rankings
-  const tmdbIds = rankingsData.map((r: any) => r.movie_id);
+  const tmdbIds = typedRankingsData.map((r) => r.movie_id);
 
   // Map TMDB IDs to internal content IDs
   const { data: contentMapping } = await supabase
@@ -201,14 +312,15 @@ export async function getUserRankingsWithRatings(
     .in('tmdb_id', tmdbIds);
 
   // Build TMDB ID → content ID map
+  // Use Number() to ensure consistent types (Supabase may return strings)
   const tmdbToContentMap = new Map<number, number>();
   for (const content of contentMapping || []) {
-    tmdbToContentMap.set(content.tmdb_id, content.id);
+    tmdbToContentMap.set(Number(content.tmdb_id), Number(content.id));
   }
 
   // Get internal content IDs for activity query
-  const contentIds = rankingsData
-    .map((r: any) => tmdbToContentMap.get(r.movie_id))
+  const contentIds = typedRankingsData
+    .map((r) => tmdbToContentMap.get(Number(r.movie_id)))
     .filter((id): id is number => id !== undefined);
 
   // Fetch completed activities with star ratings using content IDs
@@ -225,29 +337,35 @@ export async function getUserRankingsWithRatings(
   }
 
   // Create a map of content_id -> star_rating
+  // Use Number() to ensure consistent types (Supabase may return strings)
   const ratingsMap = new Map<number, number>();
   for (const activity of activitiesData || []) {
-    ratingsMap.set(activity.content_id, activity.star_rating);
+    ratingsMap.set(Number(activity.content_id), Number(activity.star_rating));
   }
 
-  // Combine the data
-  return rankingsData
-    .filter((item: any) => item.movies)
-    .map((item: any) => ({
-      ...item.movies,
-      ranking: {
-        id: item.id,
-        user_id: item.user_id,
-        movie_id: item.movie_id,
-        content_id: item.content_id,
-        content_type: item.content_type,
-        rank_position: item.rank_position,
-        display_score: item.display_score,
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-      },
-      star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id) ?? -1) || 0,
-    }));
+  // Combine the data - filter out rows without movies and map to RankedMovie
+  // IMPORTANT: star_rating uses null (not 0) to indicate missing data
+  return typedRankingsData
+    .filter((item): item is RankingRow & { movie: Movie } => item.movie !== null)
+    .map((item) => {
+      const contentId = tmdbToContentMap.get(Number(item.movie_id));
+      const starRating = contentId !== undefined ? ratingsMap.get(contentId) : undefined;
+
+      return {
+        ...item.movie,
+        ranking: {
+          id: item.id,
+          user_id: item.user_id,
+          movie_id: item.movie_id,
+          content_type: item.content_type,
+          rank_position: item.rank_position,
+          display_score: item.display_score,
+          created_at: item.created_at,
+          updated_at: item.updated_at,
+        },
+        star_rating: starRating ?? null,  // null indicates missing data, NOT 0 stars
+      };
+    });
 }
 
 /**
@@ -270,26 +388,35 @@ export function initializeRankingState(
 }
 
 /**
- * Initialize ranking state - compares against movies in the same DISPLAY SCORE band
- * Uses binary search on SCORE-SORTED movies for correct monotonic narrowing
+ * Initialize ranking state - compares ONLY against movies with the SAME star rating.
  *
- * This respects manual reordering: if a 5★ movie was demoted to a lower position
- * (score < 8.0), it won't appear as a comparison candidate for new 5★ movies.
+ * KEY BEHAVIOR:
+ * - 5★ movies ONLY compare against other 5★ movies
+ * - If no same-star movies exist, skip comparisons entirely (auto-place in tier)
+ * - This prevents illogical cross-band comparisons (e.g., 5★ vs 3★)
  */
 export function initializeRankingStateWithTier(
   newMovie: Movie,
   starRating: number,
   allRankings: RankedMovie[]
 ): RankingState {
-  // Filter to movies in the same DISPLAY SCORE band (respects manual reordering)
-  const { min, max } = getScoreBandForStarRating(starRating);
-  const tierMovies = allRankings.filter(m =>
-    m.ranking.display_score >= min && m.ranking.display_score <= max
+  // DEFENSIVE: Filter out movies with null/invalid star_rating
+  const validRankings = allRankings.filter(
+    (r): r is RankedMovie & { star_rating: number } =>
+      r.star_rating !== null && r.star_rating > 0
+  );
+
+  // Filter to movies with the SAME star rating (not by display_score band)
+  // This is the key fix - compare only within exact star tier
+  // Also exclude the movie being ranked to prevent self-comparison when reranking
+  // IMPORTANT: Use Number() to ensure type coercion - DB may return strings
+  const sameTierMovies = validRankings.filter(
+    m => Number(m.star_rating) === Number(starRating) && Number(m.id) !== Number(newMovie.id)
   );
 
   // Sort by display_score descending for binary search
-  // Higher scores at lower indices (position 0 = best in band)
-  const scoreSortedMovies = [...tierMovies].sort(
+  // Higher scores at lower indices (position 0 = best in tier)
+  const scoreSortedMovies = [...sameTierMovies].sort(
     (a, b) => b.ranking.display_score - a.ranking.display_score
   );
 
@@ -299,15 +426,15 @@ export function initializeRankingStateWithTier(
   return {
     newMovie,
     starRating,
-    tierMovies: scoreSortedMovies,  // Sorted by display_score for binary search
+    tierMovies: scoreSortedMovies,  // Only same-star movies with valid ratings
     allRankings,
     low: 0,
     high: n,
     comparisonIndex: n > 0 ? Math.floor(n / 2) : 0,
     comparisons: 0,
     maxComparisons,
-    isComplete: n === 0,
-    tierPosition: n === 0 ? 1 : -1,  // Position within tier
+    isComplete: n === 0,  // Skip comparisons if no same-star movies exist
+    tierPosition: n === 0 ? 1 : -1,  // Position 1 within tier if first
     finalPosition: -1,
   };
 }
@@ -357,13 +484,13 @@ export function processComparison(state: RankingState, prefersNewMovie: boolean)
 }
 
 /**
- * Save the ranking to database using tier-based positioning
+ * Save the ranking to database using STAR-TIER hierarchy.
  *
- * Global position is calculated as:
- * (count of movies in higher star tiers) + (position within current tier)
- *
- * This ensures 5-star movies always rank above 4-star, etc.
- * Rankings are now separated by content_type (movie vs tv)
+ * KEY BEHAVIORS:
+ * 1. 5★ movies ALWAYS rank above 4★, which rank above 3★, etc.
+ * 2. Global position = (count of higher-star movies) + (position within star tier)
+ * 3. Display score is calculated using NEIGHBOR-AWARE logic (NOT forced to 10)
+ * 4. A 3★ movie's first ranking gets ~6.5, not 10.0
  */
 export async function saveRanking(
   userId: string,
@@ -404,43 +531,80 @@ export async function saveRanking(
       .single();
 
     if (existingRanking) {
-      console.log('Content already ranked at position:', existingRanking.rank_position);
-      return;
+      // Remove existing ranking first so it can be re-ranked
+      await removeRanking(userId, movie.id, contentType);
     }
 
     // Get all rankings for this content type with their star ratings
     const allRankings = await getUserRankingsWithRatings(userId, contentType);
 
-    // Count movies in HIGHER star rating tiers (they come before this movie)
-    const moviesInHigherTiers = allRankings.filter(m => m.star_rating > starRating).length;
+    // DEFENSIVE: Filter out rankings with null/invalid star_rating (data integrity issues)
+    const validRankings = allRankings.filter(
+      (r): r is RankedMovie & { star_rating: number } =>
+        r.star_rating !== null && r.star_rating > 0
+    );
 
-    // Global position = higher tier count + position within tier
-    const globalPosition = moviesInHigherTiers + tierPosition;
+    // STAR-TIER HIERARCHY: Position based on star rating, not display_score
+    // Count movies with HIGHER star ratings (they all rank above this movie)
+    // IMPORTANT: Use Number() for type coercion - DB may return strings
+    const higherStarCount = validRankings.filter(r => Number(r.star_rating) > Number(starRating)).length;
 
-    // Shift existing rankings down to make room (only within same content_type)
-    const { data: toShift } = await supabase
-      .from('rankings')
-      .select('id, rank_position')
-      .eq('user_id', userId)
-      .eq('content_type', contentType)
-      .gte('rank_position', globalPosition)
-      .order('rank_position', { ascending: false });
+    // Get movies with the SAME star rating, sorted by score (for tier position)
+    // IMPORTANT: Use Number() for type coercion - DB may return strings
+    const sameTierMovies = validRankings
+      .filter(r => Number(r.star_rating) === Number(starRating))
+      .sort((a, b) => b.ranking.display_score - a.ranking.display_score);
 
-    // Update positions from highest to lowest to avoid constraint violations
-    for (const ranking of toShift || []) {
-      await supabase
-        .from('rankings')
-        .update({ rank_position: ranking.rank_position + 1 })
-        .eq('id', ranking.id);
+    let globalPosition: number;
+
+    if (sameTierMovies.length === 0) {
+      // First movie in this star tier - place right after all higher-star movies
+      globalPosition = higherStarCount + 1;
+    } else if (tierPosition > sameTierMovies.length) {
+      // Placing at end of tier - insert after last same-tier movie
+      const lastTierMovie = sameTierMovies[sameTierMovies.length - 1];
+      globalPosition = lastTierMovie.ranking.rank_position + 1;
+    } else {
+      // Insert at specific position within tier
+      // tierPosition=1 means best in tier → insert before sameTierMovies[0]
+      const insertBeforeMovie = sameTierMovies[tierPosition - 1];
+      globalPosition = insertBeforeMovie.ranking.rank_position;
     }
 
-    // Insert the new ranking with content_type (display_score calculated after)
+    // DEFENSIVE GUARD: A lower-star movie must NEVER be placed before higher-star movies
+    // This is a critical sanity check to prevent the bug from recurring
+    if (globalPosition <= higherStarCount) {
+      console.error(
+        `[Ranking] BUG PREVENTED: ${starRating}★ movie would be at position ${globalPosition}, ` +
+        `but must be > ${higherStarCount} (count of higher-star movies). Auto-fixing...`
+      );
+      globalPosition = higherStarCount + 1;
+    }
+
+    // Shift existing rankings down to make room using batch RPC (single query instead of O(n))
+    const { error: shiftError } = await supabase.rpc('shift_rankings_down', {
+      p_user_id: userId,
+      p_content_type: contentType,
+      p_from_position: globalPosition,
+    });
+
+    if (shiftError) {
+      console.error('Error shifting rankings:', shiftError);
+      throw shiftError;
+    }
+
+    // Calculate NEIGHBOR-AWARE score (NOT forced to 10)
+    // Re-fetch rankings after shifting to get accurate neighbor positions
+    const updatedRankings = await getUserRankingsWithRatings(userId, contentType);
+    const displayScore = calculateNeighborAwareScore(globalPosition, updatedRankings, starRating);
+
+    // Insert the new ranking with calculated display_score
     const { error: insertError } = await supabase.from('rankings').insert({
       user_id: userId,
       movie_id: movie.id,
       content_type: contentType,
       rank_position: globalPosition,
-      display_score: 5.0, // Temporary, will be recalculated
+      display_score: displayScore,  // Neighbor-aware score, not forced to 10
     });
 
     if (insertError) {
@@ -448,15 +612,10 @@ export async function saveRanking(
       throw insertError;
     }
 
-    // Recalculate all display scores for this content type
-    await recalculateAllScores(userId, contentType);
-
-    console.log(`Ranking saved: tier position ${tierPosition} → global position ${globalPosition} (${contentType})`);
-
     // Ensure content exists and create completed activity
     try {
-      // Ensure movie exists in content table and get content ID
-      const content = await ensureContentExists(movie.id, 'movie');
+      // Ensure content exists in content table and get content ID
+      const content = await ensureContentExists(movie.id, contentType);
 
       if (!content) {
         console.error('Failed to ensure content exists for movie:', movie.id);
@@ -477,7 +636,7 @@ export async function saveRanking(
         const activityResult = await createActivity({
           userId: userId,
           tmdbId: movie.id,
-          contentType: 'movie',
+          contentType: contentType,
           status: 'completed',
           starRating: starRating,
           watchDate: new Date(),
@@ -487,10 +646,6 @@ export async function saveRanking(
         if (!activityResult) {
           throw new Error('createActivity returned null/undefined');
         }
-
-        console.log('Created completed activity for ranking:', activityResult.id);
-      } else {
-        console.log('Activity already exists for this ranking, skipping creation');
       }
     } catch (activityError) {
       console.error('Error creating activity for ranking:', activityError);
@@ -504,8 +659,13 @@ export async function saveRanking(
 }
 
 /**
- * Reorder rankings after drag-and-drop
- * Uses negative temporary positions to avoid UNIQUE constraint violations
+ * Reorder rankings after drag-and-drop with AUTO STAR PROMOTION/DEMOTION
+ *
+ * KEY BEHAVIORS:
+ * 1. If a lower-star item is moved above higher-star items → AUTO-PROMOTE
+ * 2. If a higher-star item is moved below lower-star items → AUTO-DEMOTE
+ * 3. Score is calculated based on NEIGHBORS (midpoint), not full renormalization
+ * 4. Star ratings and list positions should NEVER contradict
  */
 export async function reorderRankings(
   userId: string,
@@ -515,10 +675,10 @@ export async function reorderRankings(
 ): Promise<void> {
   if (fromIndex === toIndex) return;
 
-  // Fetch all rankings for this content type, ordered by position
+  // Fetch all rankings with movie_id for star rating lookup
   const { data: rankings, error } = await supabase
     .from('rankings')
-    .select('id, rank_position')
+    .select('id, rank_position, movie_id, display_score')
     .eq('user_id', userId)
     .eq('content_type', contentType)
     .order('rank_position', { ascending: true });
@@ -527,74 +687,133 @@ export async function reorderRankings(
     throw new Error('Failed to fetch rankings');
   }
 
-  // Convert 0-based indices to 1-based positions
-  const fromPos = fromIndex + 1;
-  const toPos = toIndex + 1;
-  const movingDown = toPos > fromPos;
+  // Get star ratings from activity_log
+  const tmdbIds = rankings.map(r => r.movie_id);
+  const { data: contentMapping } = await supabase
+    .from('content')
+    .select('id, tmdb_id')
+    .in('tmdb_id', tmdbIds);
 
-  // Build list of updates needed
-  const updates: { id: string; tempPos: number; finalPos: number }[] = [];
+  const tmdbToContentMap = new Map<number, number>();
+  for (const c of contentMapping || []) {
+    tmdbToContentMap.set(c.tmdb_id, c.id);
+  }
 
-  // The dragged item
-  const draggedItem = rankings[fromIndex];
-  updates.push({
-    id: draggedItem.id,
-    tempPos: -1,
-    finalPos: toPos,
+  const contentIds = rankings.map(r => tmdbToContentMap.get(r.movie_id)).filter(Boolean) as number[];
+
+  const { data: activities } = await supabase
+    .from('activity_log')
+    .select('content_id, star_rating')
+    .eq('user_id', userId)
+    .eq('status', 'completed')
+    .in('content_id', contentIds);
+
+  const contentToStarMap = new Map<number, number>();
+  for (const a of activities || []) {
+    if (a.star_rating) {
+      contentToStarMap.set(a.content_id, a.star_rating);
+    }
+  }
+
+  // Build enriched rankings with star ratings
+  // DEFENSIVE: Use null for missing star_rating (not a default of 3)
+  const enrichedRankings = rankings.map(r => ({
+    ...r,
+    star_rating: contentToStarMap.get(tmdbToContentMap.get(r.movie_id) ?? -1) ?? null as number | null,
+    content_id: tmdbToContentMap.get(r.movie_id),
+  }));
+
+  // Perform the reorder in memory
+  const movedItem = enrichedRankings[fromIndex];
+  enrichedRankings.splice(fromIndex, 1);
+  enrichedRankings.splice(toIndex, 0, movedItem);
+
+  // Check for star rating contradictions and auto-adjust
+  const aboveItem = toIndex > 0 ? enrichedRankings[toIndex - 1] : null;
+  const belowItem = toIndex < enrichedRankings.length - 1 ? enrichedRankings[toIndex + 1] : null;
+
+  let newStarRating = movedItem.star_rating;
+
+  // AUTO-PROMOTE: If moved above items with higher star ratings
+  if (aboveItem && aboveItem.star_rating !== null &&
+      movedItem.star_rating !== null &&
+      aboveItem.star_rating > movedItem.star_rating) {
+    // Moved item is now above something with MORE stars - must promote
+    newStarRating = aboveItem.star_rating;
+  }
+
+  // AUTO-DEMOTE: If moved below items with lower star ratings significantly
+  if (belowItem && belowItem.star_rating !== null &&
+      movedItem.star_rating !== null &&
+      movedItem.star_rating > belowItem.star_rating) {
+    // Check how far below we are - look at items below with valid star ratings
+    const itemsBelow = enrichedRankings.slice(toIndex + 1)
+      .filter((i): i is typeof i & { star_rating: number } => i.star_rating !== null);
+    if (itemsBelow.length > 0) {
+      const highestStarBelow = Math.max(...itemsBelow.map(i => i.star_rating));
+      // If we're significantly misaligned (more than 1 star difference), demote
+      if (movedItem.star_rating > highestStarBelow + 1) {
+        newStarRating = highestStarBelow + 1;
+      }
+    }
+  }
+
+  // Calculate new score based on NEIGHBORS (not full renormalization)
+  let newScore: number;
+  if (aboveItem && belowItem) {
+    // Between two items - use midpoint
+    newScore = (aboveItem.display_score + belowItem.display_score) / 2;
+  } else if (aboveItem) {
+    // At bottom - slightly below item above
+    newScore = Math.max(aboveItem.display_score - 0.2, 1.0);
+  } else if (belowItem) {
+    // At top - slightly above item below
+    newScore = Math.min(belowItem.display_score + 0.2, 10.0);
+  } else {
+    // Only item - keep current score
+    newScore = movedItem.display_score;
+  }
+
+  newScore = Number(newScore.toFixed(1));
+
+  // Update rankings in a single atomic batch operation using RPC
+  // This replaces 2N individual updates with a single database call
+  const rankingsPayload = enrichedRankings.map((r, i) => ({
+    id: r.id,
+    rank_position: i + 1,
+    display_score: r.id === movedItem.id ? newScore : r.display_score,
+  }));
+
+  const { error: rpcError } = await supabase.rpc('reorder_rankings_batch', {
+    p_user_id: userId,
+    p_content_type: contentType,
+    p_rankings: rankingsPayload,
   });
 
-  // Items that need to shift
-  if (movingDown) {
-    // Moving down: items between fromPos+1 and toPos shift UP by 1
-    for (let i = fromIndex + 1; i <= toIndex; i++) {
-      updates.push({
-        id: rankings[i].id,
-        tempPos: -(i + 2),
-        finalPos: rankings[i].rank_position - 1,
-      });
-    }
-  } else {
-    // Moving up: items between toPos and fromPos-1 shift DOWN by 1
-    for (let i = toIndex; i < fromIndex; i++) {
-      updates.push({
-        id: rankings[i].id,
-        tempPos: -(i + 2),
-        finalPos: rankings[i].rank_position + 1,
-      });
-    }
+  if (rpcError) {
+    console.error('Error in reorder_rankings_batch RPC:', rpcError);
+    throw new Error(`Failed to reorder rankings: ${rpcError.message}`);
   }
 
-  // Phase 1: Move to temporary negative positions
-  for (const update of updates) {
-    const { error: updateError } = await supabase
-      .from('rankings')
-      .update({ rank_position: update.tempPos, updated_at: new Date().toISOString() })
-      .eq('id', update.id);
+  // Update star rating in activity_log if changed (AUTO PROMOTION/DEMOTION)
+  if (newStarRating !== movedItem.star_rating && movedItem.content_id) {
+    const { error: starUpdateError } = await supabase
+      .from('activity_log')
+      .update({ star_rating: newStarRating })
+      .eq('user_id', userId)
+      .eq('content_id', movedItem.content_id)
+      .eq('status', 'completed');
 
-    if (updateError) {
-      throw new Error(`Failed to update ranking: ${updateError.message}`);
+    if (starUpdateError) {
+      console.error('Error updating star rating:', starUpdateError);
     }
   }
-
-  // Phase 2: Move to final positions
-  for (const update of updates) {
-    const { error: updateError } = await supabase
-      .from('rankings')
-      .update({ rank_position: update.finalPos, updated_at: new Date().toISOString() })
-      .eq('id', update.id);
-
-    if (updateError) {
-      throw new Error(`Failed to update ranking: ${updateError.message}`);
-    }
-  }
-
-  // Recalculate all display scores after reorder
-  await recalculateAllScores(userId, contentType);
 }
 
 /**
- * Remove a ranking and shift positions to close gap
- * Only shifts rankings within the same content_type
+ * Remove a ranking and shift positions to close gap.
+ * PRESERVES existing scores - does NOT trigger full renormalization.
+ * This prevents large score shifts when deleting an item.
  */
 export async function removeRanking(
   userId: string,
@@ -620,7 +839,8 @@ export async function removeRanking(
     .delete()
     .eq('id', toDelete.id);
 
-  // Shift rankings above the deleted position up (only within same content_type)
+  // Shift rankings below the deleted position up (only within same content_type)
+  // NOTE: We only update rank_position, NOT display_score - preserving existing scores
   const { data: toShift } = await supabase
     .from('rankings')
     .select('id, rank_position')
@@ -634,5 +854,75 @@ export async function removeRanking(
       .from('rankings')
       .update({ rank_position: ranking.rank_position - 1 })
       .eq('id', ranking.id);
+  }
+
+  // DO NOT call recalculateAllScores - preserve existing scores
+  // This prevents large score shifts when deleting an item
+}
+
+/**
+ * Delete a ranking along with all associated data (activity, review)
+ * Performs a "clean slate" deletion for the user
+ */
+export async function deleteRankingWithActivity(
+  userId: string,
+  tmdbId: number,
+  contentType: ContentType
+): Promise<boolean> {
+  try {
+    // 1. Remove ranking (handles position shifting)
+    await removeRanking(userId, tmdbId, contentType);
+
+    // 2. Get content ID for activity lookup
+    const { data: content } = await supabase
+      .from('content')
+      .select('id')
+      .eq('tmdb_id', tmdbId)
+      .eq('content_type', contentType)
+      .single();
+
+    if (content) {
+      // 3. Get ALL activity IDs for this content (both completed and in_progress)
+      const { data: activities } = await supabase
+        .from('activity_log')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('content_id', content.id);
+
+      const activityIds = activities?.map(a => a.id) || [];
+
+      if (activityIds.length > 0) {
+        // 4. Delete likes for these activities
+        await supabase
+          .from('likes')
+          .delete()
+          .in('activity_id', activityIds);
+
+        // 5. Delete comments on these activities
+        await supabase
+          .from('comments')
+          .delete()
+          .in('activity_id', activityIds);
+
+        // 6. Delete ALL activities (both 'completed' AND 'in_progress')
+        await supabase
+          .from('activity_log')
+          .delete()
+          .eq('user_id', userId)
+          .eq('content_id', content.id);
+      }
+    }
+
+    // 7. Delete legacy review if exists (uses movie_id which is tmdb_id)
+    await supabase
+      .from('reviews')
+      .delete()
+      .eq('user_id', userId)
+      .eq('movie_id', tmdbId);
+
+    return true;
+  } catch (error) {
+    console.error('Error in deleteRankingWithActivity:', error);
+    return false;
   }
 }

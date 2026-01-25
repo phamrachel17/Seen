@@ -6,8 +6,8 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
@@ -176,9 +176,7 @@ export default function FriendPickerModal() {
 
       {/* Friends List */}
       {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.stamp} />
-        </View>
+        <LoadingScreen />
       ) : filteredFriends.length > 0 ? (
         <FlatList
           data={filteredFriends}

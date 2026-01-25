@@ -10,6 +10,7 @@ interface DraggableRankListProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   isEditMode: boolean;
   onItemPress: (tmdbId: number) => void;
+  onDelete?: (tmdbId: number) => void;
 }
 
 export function DraggableRankList({
@@ -17,10 +18,12 @@ export function DraggableRankList({
   onReorder,
   isEditMode,
   onItemPress,
+  onDelete,
 }: DraggableRankListProps) {
   // Shared values for coordinating animations on UI thread
   const dragY = useSharedValue(0);
   const draggedIndex = useSharedValue(-1);
+  const swipedOpenIndex = useSharedValue(-1);
 
   const handleDragEnd = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -38,6 +41,17 @@ export function DraggableRankList({
     [onItemPress]
   );
 
+  const handleDelete = useCallback(
+    (tmdbId: number) => {
+      // Reset swipe state
+      swipedOpenIndex.value = -1;
+      if (onDelete) {
+        onDelete(tmdbId);
+      }
+    },
+    [onDelete, swipedOpenIndex]
+  );
+
   return (
     <View style={styles.container}>
       {rankings.map((movie, index) => (
@@ -50,8 +64,10 @@ export function DraggableRankList({
           isEditMode={isEditMode}
           dragY={dragY}
           draggedIndex={draggedIndex}
+          swipedOpenIndex={swipedOpenIndex}
           onDragEnd={handleDragEnd}
           onPress={() => handleItemPress(movie.id)}
+          onDelete={handleDelete}
         />
       ))}
     </View>

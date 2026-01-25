@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { User, UserSearchResult, Review, Movie } from '@/types';
+import { cache, CACHE_KEYS, TTL } from './cache';
+import { createNotification } from './social';
 
 // Search users by username or display_name
 export async function searchUsers(
@@ -54,6 +56,21 @@ export async function followUser(
     .from('follows')
     .insert({ follower_id: followerId, following_id: followingId });
 
+  if (!error) {
+    // Invalidate caches so new follow is immediately visible
+    cache.invalidate(CACHE_KEYS.followingIds(followerId));
+    cache.invalidate(CACHE_KEYS.feed(followerId));
+    cache.invalidate(CACHE_KEYS.followCounts(followerId));
+    cache.invalidate(CACHE_KEYS.followCounts(followingId));
+
+    // Create notification for the followed user
+    await createNotification({
+      user_id: followingId,
+      actor_id: followerId,
+      type: 'follow',
+    });
+  }
+
   return !error;
 }
 
@@ -68,13 +85,26 @@ export async function unfollowUser(
     .eq('follower_id', followerId)
     .eq('following_id', followingId);
 
+  if (!error) {
+    // Invalidate caches so unfollow is immediately visible
+    cache.invalidate(CACHE_KEYS.followingIds(followerId));
+    cache.invalidate(CACHE_KEYS.feed(followerId));
+    cache.invalidate(CACHE_KEYS.followCounts(followerId));
+    cache.invalidate(CACHE_KEYS.followCounts(followingId));
+  }
+
   return !error;
 }
 
-// Get follow counts for a user
+// Get follow counts for a user (cached for 10 minutes)
 export async function getFollowCounts(
   userId: string
 ): Promise<{ followers: number; following: number }> {
+  // Check cache first
+  const cacheKey = CACHE_KEYS.followCounts(userId);
+  const cached = cache.get<{ followers: number; following: number }>(cacheKey);
+  if (cached) return cached;
+
   const [followersResult, followingResult] = await Promise.all([
     supabase
       .from('follows')
@@ -86,10 +116,15 @@ export async function getFollowCounts(
       .eq('follower_id', userId),
   ]);
 
-  return {
+  const result = {
     followers: followersResult.count || 0,
     following: followingResult.count || 0,
   };
+
+  // Cache the result
+  cache.set(cacheKey, result, TTL.MEDIUM);
+
+  return result;
 }
 
 // Get followers list
@@ -199,8 +234,13 @@ export async function checkIfFollowing(
   return !!data;
 }
 
-// Get list of user IDs that the current user is following
+// Get list of user IDs that the current user is following (cached for 10 minutes)
 export async function getFollowingIds(userId: string): Promise<string[]> {
+  // Check cache first
+  const cacheKey = CACHE_KEYS.followingIds(userId);
+  const cached = cache.get<string[]>(cacheKey);
+  if (cached) return cached;
+
   const { data, error } = await supabase
     .from('follows')
     .select('following_id')
@@ -208,7 +248,12 @@ export async function getFollowingIds(userId: string): Promise<string[]> {
 
   if (error || !data) return [];
 
-  return data.map((f) => f.following_id);
+  const result = data.map((f) => f.following_id);
+
+  // Cache the result
+  cache.set(cacheKey, result, TTL.MEDIUM);
+
+  return result;
 }
 
 // Get user profile data
@@ -227,7 +272,13 @@ export async function getUserProfile(
 
 // Get user's ranking position among all users (based on total movies ranked)
 // Returns the position (1 = most movies ranked) or null if user has no rankings
+// Cached for 1 hour as this is expensive to compute
 export async function getUserRankingPosition(userId: string): Promise<number | null> {
+  // Check cache first
+  const cacheKey = CACHE_KEYS.rankingPosition(userId);
+  const cached = cache.get<number | null>(cacheKey);
+  if (cached !== null) return cached;
+
   // Get all users' rankings counts
   const { data: allRankings, error } = await supabase
     .from('rankings')
@@ -251,15 +302,25 @@ export async function getUserRankingPosition(userId: string): Promise<number | n
     .sort((a, b) => b[1] - a[1]);
 
   const position = sortedCounts.findIndex(([id]) => id === userId);
-  return position >= 0 ? position + 1 : null;
+  const result = position >= 0 ? position + 1 : null;
+
+  // Cache the result
+  cache.set(cacheKey, result, TTL.VERY_LONG);
+
+  return result;
 }
 
-// Get user stats (films, watch time, rankings count)
+// Get user stats (films, watch time, rankings count) - cached for 30 minutes
 export async function getUserStats(userId: string): Promise<{
   totalFilms: number;
   totalMinutes: number;
   rankingsCount: number;
 }> {
+  // Check cache first
+  const cacheKey = CACHE_KEYS.userStats(userId);
+  const cached = cache.get<{ totalFilms: number; totalMinutes: number; rankingsCount: number }>(cacheKey);
+  if (cached) return cached;
+
   const [activitiesResult, rankingsResult] = await Promise.all([
     supabase
       .from('activity_log')
@@ -324,11 +385,16 @@ export async function getUserStats(userId: string): Promise<{
     return acc;
   }, 0);
 
-  return {
+  const result = {
     totalFilms: uniqueContentMap.size,
     totalMinutes,
     rankingsCount: rankingsResult.count || 0,
   };
+
+  // Cache the result
+  cache.set(cacheKey, result, TTL.LONG);
+
+  return result;
 }
 
 // Get user's recent reviews (public only for other users)

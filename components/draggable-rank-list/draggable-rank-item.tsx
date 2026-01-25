@@ -1,9 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
   useAnimatedReaction,
+  useSharedValue,
   withSpring,
   withTiming,
   runOnJS,
@@ -14,6 +15,8 @@ import * as Haptics from 'expo-haptics';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Movie, Ranking } from '@/types';
+
+const DELETE_BUTTON_WIDTH = 80;
 
 export interface RankedMovie extends Movie {
   ranking: Ranking;
@@ -28,8 +31,10 @@ interface DraggableRankItemProps {
   isEditMode: boolean;
   dragY: SharedValue<number>;
   draggedIndex: SharedValue<number>;
+  swipedOpenIndex: SharedValue<number>;
   onDragEnd: (fromIndex: number, toIndex: number) => void;
   onPress: () => void;
+  onDelete?: (tmdbId: number) => void;
 }
 
 function ScoreBadge({ score }: { score: number }) {
@@ -56,9 +61,14 @@ export function DraggableRankItem({
   isEditMode,
   dragY,
   draggedIndex,
+  swipedOpenIndex,
   onDragEnd,
   onPress,
+  onDelete,
 }: DraggableRankItemProps) {
+  // Swipe translation for delete reveal
+  const translateX = useSharedValue(0);
+
   const triggerHaptic = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   }, []);
@@ -70,6 +80,23 @@ export function DraggableRankItem({
   const triggerSuccessHaptic = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }, []);
+
+  // Close swipe when another item is swiped open or when exiting edit mode
+  useAnimatedReaction(
+    () => swipedOpenIndex.value,
+    (currentSwipedIndex) => {
+      if (currentSwipedIndex !== index && translateX.value !== 0) {
+        translateX.value = withSpring(0);
+      }
+    }
+  );
+
+  // Reset swipe when exiting edit mode
+  useEffect(() => {
+    if (!isEditMode) {
+      translateX.value = withSpring(0);
+    }
+  }, [isEditMode, translateX]);
 
   // Haptic feedback when crossing position thresholds during drag
   useAnimatedReaction(
@@ -84,10 +111,50 @@ export function DraggableRankItem({
     }
   );
 
-  const gesture = Gesture.Pan()
+  // Horizontal swipe gesture for delete reveal
+  const swipeGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-10, 10])
+    .enabled(isEditMode)
+    .onStart(() => {
+      // Close any other open swipe
+      if (swipedOpenIndex.value !== index && swipedOpenIndex.value !== -1) {
+        swipedOpenIndex.value = -1;
+      }
+    })
+    .onUpdate((e) => {
+      // Only allow left swipe (negative X)
+      if (e.translationX < 0) {
+        translateX.value = Math.max(e.translationX, -DELETE_BUTTON_WIDTH);
+      } else if (translateX.value < 0) {
+        // Allow swiping back to close
+        translateX.value = Math.min(0, translateX.value + e.translationX);
+      }
+    })
+    .onEnd(() => {
+      const threshold = -DELETE_BUTTON_WIDTH / 2;
+      if (translateX.value < threshold) {
+        translateX.value = withSpring(-DELETE_BUTTON_WIDTH);
+        swipedOpenIndex.value = index;
+        runOnJS(triggerSelectionHaptic)();
+      } else {
+        translateX.value = withSpring(0);
+        if (swipedOpenIndex.value === index) {
+          swipedOpenIndex.value = -1;
+        }
+      }
+    });
+
+  // Vertical drag gesture for reordering (requires long press)
+  const dragGesture = Gesture.Pan()
     .activateAfterLongPress(200)
     .enabled(isEditMode)
     .onStart(() => {
+      // Close any open swipe first
+      if (translateX.value !== 0) {
+        translateX.value = withSpring(0);
+        swipedOpenIndex.value = -1;
+      }
       draggedIndex.value = index;
       runOnJS(triggerHaptic)();
     })
@@ -105,6 +172,9 @@ export function DraggableRankItem({
       dragY.value = withSpring(0);
       draggedIndex.value = -1;
     });
+
+  // Combine gestures: swipe is primary, drag requires long press
+  const combinedGesture = Gesture.Race(swipeGesture, dragGesture);
 
   const animatedStyle = useAnimatedStyle(() => {
     const isBeingDragged = draggedIndex.value === index;
@@ -159,74 +229,95 @@ export function DraggableRankItem({
     };
   });
 
+  // Animated style for swipe translation
+  const swipeAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
   const handlePress = useCallback(() => {
     if (!isEditMode) {
       onPress();
     }
   }, [isEditMode, onPress]);
 
+  const handleDelete = useCallback(() => {
+    if (onDelete) {
+      onDelete(movie.id);
+    }
+  }, [onDelete, movie.id]);
+
   return (
-    <GestureDetector gesture={gesture}>
+    <GestureDetector gesture={combinedGesture}>
       <Animated.View style={[styles.itemWrapper, animatedStyle]}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.rankItem,
-            pressed && !isEditMode && styles.itemPressed,
-          ]}
-          onPress={handlePress}
-          disabled={isEditMode}
-        >
-          {/* Rank Number */}
-          <View style={styles.rankNumberContainer}>
-            <Text style={[styles.rankNumber, index < 3 && styles.topRankNumber]}>
-              {index + 1}
-            </Text>
-          </View>
+        {/* Delete button behind the row */}
+        {isEditMode && (
+          <Pressable style={styles.deleteButtonContainer} onPress={handleDelete}>
+            <IconSymbol name="trash" size={24} color={Colors.white} />
+          </Pressable>
+        )}
 
-          {/* Poster */}
-          {movie.poster_url ? (
-            <Image
-              source={{ uri: movie.poster_url }}
-              style={styles.poster}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={[styles.poster, styles.posterPlaceholder]}>
-              <Text style={styles.placeholderLetter}>{movie.title[0]}</Text>
+        {/* Main content with swipe animation */}
+        <Animated.View style={[styles.swipeableContent, swipeAnimatedStyle]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.rankItem,
+              pressed && !isEditMode && styles.itemPressed,
+            ]}
+            onPress={handlePress}
+            disabled={isEditMode}
+          >
+            {/* Rank Number */}
+            <View style={styles.rankNumberContainer}>
+              <Text style={[styles.rankNumber, index < 3 && styles.topRankNumber]}>
+                {index + 1}
+              </Text>
             </View>
-          )}
 
-          {/* Movie Info */}
-          <View style={styles.movieInfo}>
-            <Text style={styles.movieTitle} numberOfLines={2}>
-              {movie.title}
-            </Text>
-            <Text style={styles.movieMeta}>
-              {movie.release_year}
-              {movie.director ? ` • ${movie.director}` : ''}
-            </Text>
-          </View>
+            {/* Poster */}
+            {movie.poster_url ? (
+              <Image
+                source={{ uri: movie.poster_url }}
+                style={styles.poster}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={[styles.poster, styles.posterPlaceholder]}>
+                <Text style={styles.placeholderLetter}>{movie.title[0]}</Text>
+              </View>
+            )}
 
-          {/* Display Score */}
-          <View style={styles.scoreContainer}>
-            <ScoreBadge score={movie.ranking.display_score} />
-          </View>
+            {/* Movie Info */}
+            <View style={styles.movieInfo}>
+              <Text style={styles.movieTitle} numberOfLines={2}>
+                {movie.title}
+              </Text>
+              <Text style={styles.movieMeta}>
+                {movie.release_year}
+                {movie.director ? ` • ${movie.director}` : ''}
+              </Text>
+            </View>
 
-          {/* Edit mode: drag handle, otherwise chevron */}
-          {isEditMode ? (
-            <IconSymbol
-              name="line.3.horizontal"
-              size={20}
-              color={Colors.textMuted}
-            />
-          ) : (
-            <IconSymbol
-              name="chevron.right"
-              size={16}
-              color={Colors.textMuted}
-            />
-          )}
-        </Pressable>
+            {/* Display Score */}
+            <View style={styles.scoreContainer}>
+              <ScoreBadge score={movie.ranking.display_score} />
+            </View>
+
+            {/* Edit mode: drag handle, otherwise chevron */}
+            {isEditMode ? (
+              <IconSymbol
+                name="line.3.horizontal"
+                size={20}
+                color={Colors.textMuted}
+              />
+            ) : (
+              <IconSymbol
+                name="chevron.right"
+                size={16}
+                color={Colors.textMuted}
+              />
+            )}
+          </Pressable>
+        </Animated.View>
       </Animated.View>
     </GestureDetector>
   );
@@ -238,6 +329,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 8,
     elevation: 5,
+    position: 'relative',
+  },
+  swipeableContent: {
+    backgroundColor: Colors.background,
+  },
+  deleteButtonContainer: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: DELETE_BUTTON_WIDTH,
+    backgroundColor: Colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.error,
   },
   rankItem: {
     flexDirection: 'row',

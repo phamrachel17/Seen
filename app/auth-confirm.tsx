@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { SeenLoader } from '@/components/ui/seen-loader';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
@@ -60,7 +61,9 @@ export default function AuthConfirmScreen() {
 
         {status === 'loading' && (
           <>
-            <ActivityIndicator size="large" color={Colors.stamp} style={styles.icon} />
+            <View style={styles.icon}>
+              <SeenLoader size={48} />
+            </View>
             <Text style={styles.statusTitle}>Confirming your email...</Text>
             <Text style={styles.statusText}>Please wait while we verify your account.</Text>
           </>
@@ -145,10 +148,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   button: {
-    backgroundColor: Colors.handwriting,
+    backgroundColor: Colors.stamp,
     paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing['3xl'],
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     marginTop: Spacing.lg,
   },
@@ -157,9 +160,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.sm,
-    color: Colors.white,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
+    fontSize: FontSizes.md,
+    color: Colors.paper,
   },
 });

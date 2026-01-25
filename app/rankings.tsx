@@ -14,7 +14,8 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { reorderRankings } from '@/lib/ranking';
+import { useCache } from '@/lib/cache-context';
+import { reorderRankings, deleteRankingWithActivity } from '@/lib/ranking';
 import { DraggableRankList, RankedMovie } from '@/components/draggable-rank-list';
 import { ContentType } from '@/types';
 
@@ -22,6 +23,7 @@ export default function RankingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { invalidate } = useCache();
   const { userId } = useLocalSearchParams<{ userId?: string }>();
 
   // Use provided userId or fall back to current user
@@ -79,14 +81,15 @@ export default function RankingsScreen() {
           .in('tmdb_id', tmdbIds);
 
         // Build TMDB ID → content ID map
+        // Use Number() to ensure consistent types (Supabase may return strings)
         const tmdbToContentMap = new Map<number, number>();
         for (const content of contentMapping || []) {
-          tmdbToContentMap.set(content.tmdb_id, content.id);
+          tmdbToContentMap.set(Number(content.tmdb_id), Number(content.id));
         }
 
         // Get internal content IDs for activity query
         const contentIds = rankingsData
-          .map((r: any) => tmdbToContentMap.get(r.movie_id))
+          .map((r: any) => tmdbToContentMap.get(Number(r.movie_id)))
           .filter((id): id is number => id !== undefined);
 
         // Fetch completed activities with star ratings using content IDs
@@ -99,9 +102,10 @@ export default function RankingsScreen() {
           .not('star_rating', 'is', null);
 
         // Create map of content_id -> star_rating
+        // Use Number() to ensure consistent types (Supabase may return strings)
         const ratingsMap = new Map<number, number>();
         for (const activity of activitiesData || []) {
-          ratingsMap.set(activity.content_id, activity.star_rating);
+          ratingsMap.set(Number(activity.content_id), activity.star_rating);
         }
 
         // Combine data - sorted by rank_position (already from DB)
@@ -119,7 +123,7 @@ export default function RankingsScreen() {
               created_at: item.created_at,
               updated_at: item.updated_at,
             },
-            star_rating: ratingsMap.get(tmdbToContentMap.get(item.movie_id) ?? -1) || 0,
+            star_rating: ratingsMap.get(tmdbToContentMap.get(Number(item.movie_id)) ?? -1) || 0,
           }));
       }
 
@@ -165,19 +169,36 @@ export default function RankingsScreen() {
     async (fromIndex: number, toIndex: number) => {
       if (!user?.id || fromIndex === toIndex) return;
 
-      // Optimistic update - reorder and recalculate scores
+      // Optimistic update - reorder with NEIGHBOR-AWARE scoring (not full renormalization)
       const newRankings = [...rankings];
       const [moved] = newRankings.splice(fromIndex, 1);
       newRankings.splice(toIndex, 0, moved);
 
-      // Recalculate display scores based on new positions
-      const total = newRankings.length;
+      // Calculate neighbor-aware score for the moved item ONLY
+      const aboveItem = toIndex > 0 ? newRankings[toIndex - 1] : null;
+      const belowItem = toIndex < newRankings.length - 1 ? newRankings[toIndex + 1] : null;
+
+      let newScore: number;
+      if (aboveItem && belowItem) {
+        // Between two items - use midpoint
+        newScore = (aboveItem.ranking.display_score + belowItem.ranking.display_score) / 2;
+      } else if (aboveItem) {
+        // At bottom - slightly below item above
+        newScore = Math.max(aboveItem.ranking.display_score - 0.2, 1.0);
+      } else if (belowItem) {
+        // At top - slightly above item below
+        newScore = Math.min(belowItem.ranking.display_score + 0.2, 10.0);
+      } else {
+        // Only item - keep current score
+        newScore = moved.ranking.display_score;
+      }
+
+      // Update positions and ONLY the moved item's score
       newRankings.forEach((movie, index) => {
-        const score = total <= 1 ? 10.0 : 10.0 - (index / (total - 1)) * 9.0;
         movie.ranking = {
           ...movie.ranking,
-          display_score: Number(score.toFixed(1)),
           rank_position: index + 1,
+          display_score: movie === moved ? Number(newScore.toFixed(1)) : movie.ranking.display_score,
         };
       });
 
@@ -190,13 +211,79 @@ export default function RankingsScreen() {
 
       try {
         await reorderRankings(user.id, activeTab, fromIndex, toIndex);
+        // Invalidate caches on successful reorder
+        invalidate('ranking_reorder', user.id);
+        // Reload to get any auto star promotion/demotion changes
+        await loadRankings();
       } catch (error) {
         console.error('Failed to save reorder:', error);
         Alert.alert('Error', 'Failed to save new order. Please try again.');
         await loadRankings();
       }
     },
-    [user?.id, activeTab, rankings, loadRankings]
+    [user?.id, activeTab, rankings, loadRankings, invalidate]
+  );
+
+  const handleDelete = useCallback(
+    (tmdbId: number) => {
+      if (!user?.id) return;
+
+      // Find the movie to get its title
+      const movie = rankings.find((r) => r.id === tmdbId);
+      const title = movie?.title || 'this title';
+
+      Alert.alert(
+        'Remove from Rankings',
+        `Remove "${title}" from your rankings? This will also delete your review and rating.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: async () => {
+              // Optimistic update - remove from list
+              // PRESERVE existing scores - only update positions, not scores
+              const newRankings = rankings.filter((r) => r.id !== tmdbId);
+
+              // Update positions only - preserve existing scores (no renormalization)
+              newRankings.forEach((m, index) => {
+                m.ranking = {
+                  ...m.ranking,
+                  rank_position: index + 1,
+                  // Keep existing display_score - no renormalization
+                };
+              });
+
+              // Update the correct tab's state
+              if (activeTab === 'movie') {
+                setMovieRankings(newRankings);
+              } else {
+                setTvRankings(newRankings);
+              }
+
+              // Exit edit mode if no more items to manage
+              if (newRankings.length === 0) {
+                setIsEditMode(false);
+              }
+
+              try {
+                const success = await deleteRankingWithActivity(user.id, tmdbId, activeTab);
+                if (!success) {
+                  throw new Error('Delete failed');
+                }
+                // Invalidate caches on successful delete
+                invalidate('ranking_delete', user.id);
+              } catch (error) {
+                console.error('Failed to delete ranking:', error);
+                Alert.alert('Error', 'Failed to remove from rankings. Please try again.');
+                await loadRankings();
+              }
+            },
+          },
+        ]
+      );
+    },
+    [user?.id, activeTab, rankings, loadRankings, invalidate]
   );
 
   return (
@@ -207,7 +294,7 @@ export default function RankingsScreen() {
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{isOwnRankings ? 'My Rankings' : 'Their Rankings'}</Text>
-        {isOwnRankings && rankings.length > 1 ? (
+        {isOwnRankings && rankings.length >= 1 ? (
           <Pressable
             onPress={() => setIsEditMode(!isEditMode)}
             style={styles.editButton}
@@ -279,6 +366,7 @@ export default function RankingsScreen() {
               onReorder={handleReorder}
               isEditMode={isEditMode && isOwnRankings}
               onItemPress={navigateToContent}
+              onDelete={handleDelete}
             />
           </View>
         )}

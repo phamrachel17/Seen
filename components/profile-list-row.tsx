@@ -22,7 +22,7 @@ export function ProfileListRow({ title, count, onPress, icon }: ProfileListRowPr
         <Text style={styles.title}>{title}</Text>
       </View>
       <View style={styles.rightContent}>
-        <Text style={styles.count}>{count} {count === 1 ? 'film' : 'films'}</Text>
+        <Text style={styles.count}>{count} {count === 1 ? 'title' : 'titles'}</Text>
         <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
       </View>
     </Pressable>

@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator } from 'react-native';
+import { View } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts } from 'expo-font';
 import {
@@ -23,6 +24,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { CacheProvider } from '@/lib/cache-context';
 import { Colors } from '@/constants/theme';
 import 'react-native-reanimated';
 
@@ -75,11 +77,7 @@ function RootLayoutNav() {
   }, [router]);
 
   if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-        <ActivityIndicator size="large" color={Colors.stamp} />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   return (
@@ -216,9 +214,11 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <RootLayoutNav />
-      </AuthProvider>
+      <CacheProvider>
+        <AuthProvider>
+          <RootLayoutNav />
+        </AuthProvider>
+      </CacheProvider>
     </GestureHandlerRootView>
   );
 }

@@ -16,122 +16,64 @@ import { ProfileAvatar } from '@/components/profile-avatar';
 import { ProfileListRow } from '@/components/profile-list-row';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { getFollowCounts, getUserRankingPosition } from '@/lib/follows';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
-import { Movie, User, Activity } from '@/types';
-
-interface UserStats {
-  totalTitles: number;
-  totalMinutes: number;
-  rankingsCount: number;
-}
+import { useUserData } from '@/lib/hooks/useUserData';
+import { User, Activity } from '@/types';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
 
-  const [stats, setStats] = useState<UserStats>({
-    totalTitles: 0,
-    totalMinutes: 0,
-    rankingsCount: 0,
+  // Use cached user data hook for profile, stats, follow counts, and ranking position
+  const {
+    profile: cachedProfile,
+    stats: cachedStats,
+    followCounts,
+    rankingPosition,
+    refresh: refreshUserData,
+  } = useUserData(user?.id);
+
+  // Local state for data not covered by the hook
+  const [localStats, setLocalStats] = useState<{ totalMovies: number; totalShows: number }>({
+    totalMovies: 0,
+    totalShows: 0,
   });
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
-  const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
-  const [rankingPosition, setRankingPosition] = useState<number | null>(null);
   const [watchlistCount, setWatchlistCount] = useState(0);
   const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
 
   const loadUserData = useCallback(async () => {
     if (!user) return;
 
+    // Track mounted state to prevent state updates after unmount
+    let isMounted = true;
+
     try {
-      // Load profile data
+      // Load profile data (for local display - cached version is used as fallback)
       const { data: profile } = await supabase
         .from('users')
         .select('username, profile_image_url, display_name, bio')
         .eq('id', user.id)
         .single();
 
-      if (profile) {
+      if (isMounted && profile) {
         setProfileData(profile);
       }
 
-      // Load completed activities count and total watch time
-      const { data: activities, error: activitiesError } = await supabase
-        .from('activity_log')
-        .select(`
-          id,
-          content_id,
-          content:content_id (
-            id,
-            content_type,
-            runtime_minutes,
-            total_episodes,
-            episode_runtime
-          )
-        `)
-        .eq('user_id', user.id)
-        .eq('status', 'completed');
-
-      if (!activitiesError && activities) {
-        // Deduplicate by content_id
-        const uniqueContentMap = new Map<number, any>();
-        for (const activity of activities) {
-          if (!uniqueContentMap.has(activity.content_id)) {
-            uniqueContentMap.set(activity.content_id, activity);
-          }
-        }
-
-        // Calculate total watch time from unique titles
-        const totalMinutes = Array.from(uniqueContentMap.values()).reduce((acc, activity) => {
-          const content = activity.content as {
-            content_type: string;
-            runtime_minutes?: number;
-            total_episodes?: number;
-            episode_runtime?: number;
-          } | null;
-
-          if (!content) return acc;
-
-          // For movies: use runtime_minutes
-          if (content.content_type === 'movie') {
-            return acc + (content.runtime_minutes || 0);
-          }
-
-          // For TV shows: use runtime_minutes if available, otherwise calculate
-          if (content.content_type === 'tv') {
-            if (content.runtime_minutes) {
-              return acc + content.runtime_minutes;
-            }
-            // Calculate from episodes if runtime not available
-            if (content.total_episodes && content.episode_runtime) {
-              return acc + content.total_episodes * content.episode_runtime;
-            }
-          }
-
-          return acc;
-        }, 0);
-
-        setStats((prev) => ({
-          ...prev,
-          totalTitles: uniqueContentMap.size,
-          totalMinutes,
-        }));
-      }
-
-      // Load rankings count
-      const { count: rankingsCount } = await supabase
+      // Load rankings to count movies vs shows (ensures FILMS + SHOWS = Rankings count)
+      const { data: rankings, error: rankingsError } = await supabase
         .from('rankings')
-        .select('id', { count: 'exact', head: true })
+        .select('content_type')
         .eq('user_id', user.id);
 
-      setStats((prev) => ({
-        ...prev,
-        rankingsCount: rankingsCount || 0,
-      }));
+      if (isMounted && !rankingsError && rankings) {
+        const movieCount = rankings.filter(r => r.content_type === 'movie').length;
+        const showCount = rankings.filter(r => r.content_type === 'tv').length;
+        setLocalStats({ totalMovies: movieCount, totalShows: showCount });
+      }
 
       // Load watchlist count
       const { count: wlCount } = await supabase
@@ -139,23 +81,27 @@ export default function ProfileScreen() {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      setWatchlistCount(wlCount || 0);
+      if (isMounted) {
+        setWatchlistCount(wlCount || 0);
+      }
 
       // Load currently watching count
       const inProgressActivities = await getUserActivities(user.id, 'in_progress');
 
-      // Deduplicate by content_id FIRST to match display logic in currently-watching screen
-      const uniqueContent = new Map<number, any>();
-      for (const activity of inProgressActivities) {
-        if (!uniqueContent.has(activity.content_id)) {
-          uniqueContent.set(activity.content_id, activity);
+      if (isMounted) {
+        // Deduplicate by content_id FIRST to match display logic in currently-watching screen
+        const uniqueContent = new Map<number, any>();
+        for (const activity of inProgressActivities) {
+          if (!uniqueContent.has(activity.content_id)) {
+            uniqueContent.set(activity.content_id, activity);
+          }
         }
+
+        // Filter to only count activities that are truly in progress (< 100%)
+        const activeInProgress = Array.from(uniqueContent.values()).filter(isActivityInProgress);
+
+        setCurrentlyWatchingCount(activeInProgress.length);
       }
-
-      // Filter to only count activities that are truly in progress (< 100%)
-      const activeInProgress = Array.from(uniqueContent.values()).filter(isActivityInProgress);
-
-      setCurrentlyWatchingCount(activeInProgress.length);
 
       // Load recent activities (completed with reviews)
       const { data: activityData, error: activityError } = await supabase
@@ -169,23 +115,20 @@ export default function ProfileScreen() {
         .order('created_at', { ascending: false })
         .limit(6);
 
-      if (!activityError && activityData) {
+      if (isMounted && !activityError && activityData) {
         const activitiesWithContent = activityData.filter(
           (item: Activity) => item.content
         ) as Activity[];
         setRecentActivities(activitiesWithContent);
       }
-
-      // Load follow counts and ranking position
-      const [counts, position] = await Promise.all([
-        getFollowCounts(user.id),
-        getUserRankingPosition(user.id),
-      ]);
-      setFollowCounts(counts);
-      setRankingPosition(position);
     } catch (error) {
       console.error('Error loading user data:', error);
     }
+
+    // Return cleanup function to mark as unmounted
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
   useFocusEffect(
@@ -196,7 +139,7 @@ export default function ProfileScreen() {
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadUserData();
+    await Promise.all([loadUserData(), refreshUserData()]);
     setIsRefreshing(false);
   };
 
@@ -250,8 +193,8 @@ export default function ProfileScreen() {
           >
             <View style={styles.avatarContainer}>
               <ProfileAvatar
-                imageUrl={profileData?.profile_image_url}
-                username={profileData?.username || user?.user_metadata?.username || 'User'}
+                imageUrl={profileData?.profile_image_url || cachedProfile?.profile_image_url}
+                username={profileData?.username || cachedProfile?.username || user?.user_metadata?.username || 'User'}
                 size="large"
                 variant="poster"
               />
@@ -260,17 +203,17 @@ export default function ProfileScreen() {
               </View>
             </View>
             <Text style={styles.usernameUnderAvatar}>
-              @{profileData?.username || user?.user_metadata?.username || 'user'}
+              @{profileData?.username || cachedProfile?.username || user?.user_metadata?.username || 'user'}
             </Text>
           </Pressable>
 
           {/* Right: Display Name, Bio, Follow Stats */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
-              {profileData?.display_name || profileData?.username || user?.user_metadata?.username || 'Cinephile'}
+              {profileData?.display_name || cachedProfile?.display_name || profileData?.username || cachedProfile?.username || user?.user_metadata?.username || 'Cinephile'}
             </Text>
             <Text style={styles.profileBio}>
-              {profileData?.bio || 'Film Enthusiast'}
+              {profileData?.bio || cachedProfile?.bio || 'Film Enthusiast'}
             </Text>
             <View style={styles.followStats}>
               <Pressable
@@ -310,13 +253,18 @@ export default function ProfileScreen() {
         {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>{stats.totalTitles}</Text>
-            <Text style={styles.statLabel}>TITLES</Text>
+            <Text style={styles.statNumber}>{localStats.totalMovies}</Text>
+            <Text style={styles.statLabel}>FILMS</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statBox}>
+            <Text style={styles.statNumber}>{localStats.totalShows}</Text>
+            <Text style={styles.statLabel}>SHOWS</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>
-              {stats.totalMinutes > 0 ? formatWatchTime(stats.totalMinutes) : '—'}
+              {cachedStats.totalMinutes > 0 ? formatWatchTime(cachedStats.totalMinutes) : '—'}
             </Text>
             <Text style={styles.statLabel}>WATCHED</Text>
           </View>
@@ -334,7 +282,7 @@ export default function ProfileScreen() {
           <Text style={styles.sectionLabel}>LISTS</Text>
           <ProfileListRow
             title="Rankings"
-            count={stats.rankingsCount}
+            count={cachedStats.rankingsCount}
             onPress={() => router.push('/rankings')}
             icon="list.number"
           />

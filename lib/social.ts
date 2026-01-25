@@ -1,21 +1,35 @@
 import { supabase } from './supabase';
 import { Comment, Notification, User, Review, WatchHistoryEntry } from '@/types';
-import { getWatchDates } from './watch-history';
 
 // ============ MOVIE RATINGS ============
 
 export async function getMovieAverageRating(
   movieId: number
 ): Promise<{ average: number; count: number } | null> {
+  // First, get the content_id for this TMDB movie
+  const { data: contentData } = await supabase
+    .from('content')
+    .select('id')
+    .eq('tmdb_id', movieId)
+    .eq('content_type', 'movie')
+    .single();
+
+  if (!contentData) {
+    return null;
+  }
+
+  // Query activity_log for completed activities with star ratings
   const { data, error } = await supabase
-    .from('reviews')
+    .from('activity_log')
     .select('star_rating')
-    .eq('movie_id', movieId)
-    .eq('is_private', false);
+    .eq('content_id', contentData.id)
+    .eq('status', 'completed')
+    .eq('is_private', false)
+    .not('star_rating', 'is', null);
 
   if (error || !data || data.length === 0) return null;
 
-  const sum = data.reduce((acc, r) => acc + r.star_rating, 0);
+  const sum = data.reduce((acc, r) => acc + (r.star_rating || 0), 0);
   return {
     average: sum / data.length,
     count: data.length,
@@ -247,16 +261,12 @@ export async function getNotifications(
   userId: string,
   limit: number = 50
 ): Promise<Notification[]> {
+  // First fetch notifications with actor info
   const { data, error } = await supabase
     .from('notifications')
     .select(`
       *,
-      actor:users!notifications_actor_id_fkey (id, username, display_name, profile_image_url),
-      review:reviews!notifications_review_id_fkey (
-        id,
-        movie_id,
-        movies (id, title, poster_url)
-      )
+      actor:users!notifications_actor_id_fkey (id, username, display_name, profile_image_url)
     `)
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
@@ -267,7 +277,33 @@ export async function getNotifications(
     return [];
   }
 
-  return data as Notification[];
+  // For notifications with review_id (which maps to activity_id), fetch activity and content info
+  const notificationsWithContent = await Promise.all(
+    data.map(async (notification) => {
+      if (notification.review_id) {
+        // Fetch activity to get content_id
+        const { data: activity } = await supabase
+          .from('activity_log')
+          .select('id, content_id, content:content(id, tmdb_id, title, poster_url, content_type)')
+          .eq('id', notification.review_id)
+          .single();
+
+        if (activity?.content) {
+          return {
+            ...notification,
+            activity: {
+              id: activity.id,
+              content_id: activity.content_id,
+              content: activity.content,
+            },
+          };
+        }
+      }
+      return notification;
+    })
+  );
+
+  return notificationsWithContent as Notification[];
 }
 
 export async function markNotificationRead(
@@ -667,34 +703,79 @@ export async function getFriendsReviewsForMovie(
 
   const followingIds = followsData.map((f) => f.following_id);
 
-  // Get public reviews for this movie from followed users
-  const { data: reviewsData, error: reviewsError } = await supabase
-    .from('reviews')
+  // First, get the content_id for this TMDB movie
+  const { data: contentData } = await supabase
+    .from('content')
+    .select('id')
+    .eq('tmdb_id', movieId)
+    .eq('content_type', 'movie')
+    .single();
+
+  if (!contentData) {
+    return []; // Movie not in content table yet
+  }
+
+  // Query activity_log for completed activities from followed users
+  const { data: activitiesData, error: activitiesError } = await supabase
+    .from('activity_log')
     .select(`
-      *,
-      users!reviews_user_id_fkey (
+      id,
+      user_id,
+      content_id,
+      star_rating,
+      review_text,
+      watch_date,
+      tagged_friends,
+      is_private,
+      created_at,
+      user:user_id (
         id,
         username,
         display_name,
         profile_image_url
       )
     `)
-    .eq('movie_id', movieId)
+    .eq('content_id', contentData.id)
+    .eq('status', 'completed')
     .eq('is_private', false)
     .in('user_id', followingIds)
     .order('created_at', { ascending: false });
 
-  if (reviewsError || !reviewsData) {
+  if (activitiesError || !activitiesData) {
     return [];
   }
 
-  // Fetch watch dates for each friend's review
-  const reviewsWithDates = await Promise.all(
-    reviewsData.map(async (review) => {
-      const dates = await getWatchDates(review.user_id, movieId);
-      return { ...review, watchDates: dates } as FriendReview;
-    })
-  );
+  // Batch fetch all watch dates in a single query
+  const userIds = activitiesData.map((a) => a.user_id);
+  const { data: allWatchDates } = await supabase
+    .from('watch_history')
+    .select('*')
+    .in('user_id', userIds)
+    .eq('movie_id', movieId)
+    .order('watched_at', { ascending: false });
+
+  // Create lookup map: user_id -> watch dates
+  const watchDatesMap = new Map<string, WatchHistoryEntry[]>();
+  for (const wd of allWatchDates || []) {
+    const existing = watchDatesMap.get(wd.user_id) || [];
+    existing.push(wd);
+    watchDatesMap.set(wd.user_id, existing);
+  }
+
+  // Transform activities to FriendReview format
+  const reviewsWithDates = activitiesData.map((activity) => ({
+    id: activity.id,
+    user_id: activity.user_id,
+    movie_id: movieId,
+    star_rating: activity.star_rating,
+    review_text: activity.review_text,
+    watch_date: activity.watch_date,
+    tagged_friends: activity.tagged_friends,
+    is_private: activity.is_private,
+    created_at: activity.created_at,
+    users: activity.user,
+    watchDates: watchDatesMap.get(activity.user_id) || [],
+  })) as FriendReview[];
 
   return reviewsWithDates;
 }

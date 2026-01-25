@@ -1,9 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { HeartAnimation } from '@/components/ui/heart-animation';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { formatProgress } from '@/lib/activity';
@@ -18,7 +22,12 @@ interface ActivityFeedCardProps {
   refreshKey?: number;
 }
 
-export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }: ActivityFeedCardProps) {
+export const ActivityFeedCard = React.memo(function ActivityFeedCard({
+  activity,
+  onPress,
+  onLikeChange,
+  refreshKey,
+}: ActivityFeedCardProps) {
   const router = useRouter();
   const { user: currentUser } = useAuth();
 
@@ -29,6 +38,7 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
   const [isLiked, setIsLiked] = useState(false);
   const [isLikeLoading, setIsLikeLoading] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
+  const [showHeart, setShowHeart] = useState(false);
 
   useEffect(() => {
     loadInteractions();
@@ -73,6 +83,29 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
     setIsLikeLoading(false);
     onLikeChange?.();
   }, [currentUser, isLikeLoading, isLiked, activity.id, activity.user_id, onLikeChange]);
+
+  // Double-tap to like handler
+  const handleDoubleTapLike = useCallback(() => {
+    if (!currentUser || isLikeLoading) return;
+
+    // Show heart animation
+    setShowHeart(true);
+
+    // Haptic feedback (skip on web)
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
+    // If already liked, just show animation (no toggle)
+    if (isLiked) return;
+
+    // Trigger like
+    handleLikePress();
+  }, [currentUser, isLikeLoading, isLiked, handleLikePress]);
+
+  const handleHeartAnimationComplete = useCallback(() => {
+    setShowHeart(false);
+  }, []);
 
   const handleCommentPress = () => {
     router.push(`/activity-detail/${activity.id}`);
@@ -142,11 +175,21 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
     );
   };
 
+  // Double-tap gesture for liking
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(300)
+    .onEnd(() => {
+      runOnJS(handleDoubleTapLike)();
+    });
+
   return (
-    <Pressable
-      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
-      onPress={handleCardPress}
-    >
+    <GestureDetector gesture={doubleTapGesture}>
+      <Animated.View>
+        <Pressable
+          style={({ pressed }) => [styles.container, pressed && styles.pressed]}
+          onPress={handleCardPress}
+        >
       {/* User Header - Action First */}
       <View style={styles.userHeader}>
         <Pressable style={styles.userInfo} onPress={handleUserPress}>
@@ -293,9 +336,17 @@ export function ActivityFeedCard({ activity, onPress, onLikeChange, refreshKey }
           </View>
         )}
       </View>
+
+      {/* Heart animation overlay for double-tap like */}
+      <HeartAnimation
+        visible={showHeart}
+        onComplete={handleHeartAnimationComplete}
+      />
     </Pressable>
+      </Animated.View>
+    </GestureDetector>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

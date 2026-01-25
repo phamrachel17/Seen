@@ -77,22 +77,21 @@ const styles = StyleSheet.create({
   },
   illustrationContainer: {
     flex: 1,
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
   },
   illustration: {
     width: '100%',
     height: '100%',
-    maxHeight: 320,
+    maxHeight: 300,
   },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: Spacing.xl,
     paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.xl,
+    paddingTop: Spacing.xl,
   },
   button: {
     paddingVertical: Spacing.lg,

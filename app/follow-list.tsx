@@ -5,14 +5,15 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
+import { LoadingScreen } from '@/components/ui/loading-screen';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { UserListItem } from '@/components/user-list-item';
 import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
 import {
   getFollowers,
   getFollowing,
@@ -27,6 +28,7 @@ export default function FollowListModal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { invalidate } = useCache();
   const params = useLocalSearchParams<{ type: string; userId: string }>();
 
   const initialTab = (params.type as ListType) || 'followers';
@@ -126,7 +128,10 @@ export default function FollowListModal() {
         ? await unfollowUser(user.id, targetId)
         : await followUser(user.id, targetId);
 
-      if (!success) {
+      if (success) {
+        // Invalidate caches on successful follow/unfollow
+        invalidate(isCurrentlyFollowing ? 'unfollow' : 'follow', user.id);
+      } else {
         // Revert on failure
         setFollowingIds((prev) => {
           const next = new Set(prev);
@@ -218,9 +223,7 @@ export default function FollowListModal() {
 
       {/* Content */}
       {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.stamp} />
-        </View>
+        <LoadingScreen />
       ) : currentUsers.length > 0 ? (
         <FlatList
           data={currentUsers}
