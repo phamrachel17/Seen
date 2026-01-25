@@ -268,7 +268,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
           )}
           {isInProgress && activity.note && (
             <Text style={styles.noteText} numberOfLines={2}>
-              "{activity.note}"
+              &quot;{activity.note}&quot;
             </Text>
           )}
         </View>

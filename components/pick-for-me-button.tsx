@@ -46,7 +46,7 @@ export function PickForMeButton({
       <View style={styles.prominentTextContainer}>
         <Text style={styles.prominentTitle}>Pick for Me</Text>
         <Text style={styles.prominentSubtitle}>
-          Can't decide? Let us choose
+          Can&apos;t decide? Let us choose
         </Text>
       </View>
       <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />

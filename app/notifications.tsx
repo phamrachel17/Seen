@@ -222,7 +222,7 @@ export default function NotificationsScreen() {
         <IconSymbol name="bell" size={48} color={Colors.textMuted} />
         <Text style={styles.emptyStateTitle}>No notifications yet</Text>
         <Text style={styles.emptyStateText}>
-          When someone likes, comments, or tags you, you'll see it here
+          When someone likes, comments, or tags you, you&apos;ll see it here
         </Text>
       </View>
     );

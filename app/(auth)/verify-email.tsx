@@ -45,6 +45,9 @@ export default function VerifyEmailScreen() {
       const { error: resendError } = await supabase.auth.resend({
         type: 'signup',
         email: email || '',
+        options: {
+          emailRedirectTo: 'seen://auth/confirm',
+        },
       });
 
       if (resendError) {

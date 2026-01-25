@@ -138,7 +138,7 @@ export function AddToListModal({
             {lists.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>
-                  You haven't created any lists yet
+                  You haven&apos;t created any lists yet
                 </Text>
               </View>
             ) : (

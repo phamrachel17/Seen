@@ -432,7 +432,7 @@ export default function RankingModal() {
                     {detailPopup.activity?.review_text && (
                       <View style={styles.popupSection}>
                         <Text style={styles.popupReviewText}>
-                          "{detailPopup.activity.review_text}"
+                          &quot;{detailPopup.activity.review_text}&quot;
                         </Text>
                       </View>
                     )}

@@ -109,6 +109,9 @@ export default function SignUpScreen() {
           await supabase.auth.resend({
             type: 'signup',
             email: trimmedEmail,
+            options: {
+              emailRedirectTo: 'seen://auth/confirm',
+            },
           });
           setResendSuccess(true);
           setLastResendTime(Date.now());
@@ -147,6 +150,9 @@ export default function SignUpScreen() {
       const { error } = await supabase.auth.resend({
         type: 'signup',
         email: email.trim(),
+        options: {
+          emailRedirectTo: 'seen://auth/confirm',
+        },
       });
       if (!error) {
         setResendSuccess(true);

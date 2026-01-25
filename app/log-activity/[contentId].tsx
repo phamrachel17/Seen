@@ -918,7 +918,7 @@ export default function LogActivityModal() {
               </View>
               {existingCompleted.review_text && (
                 <Text style={styles.existingReviewPreview} numberOfLines={2}>
-                  "{existingCompleted.review_text}"
+                  &quot;{existingCompleted.review_text}&quot;
                 </Text>
               )}
             </View>
@@ -1338,7 +1338,7 @@ export default function LogActivityModal() {
                 </View>
                 {episodes.length > 0 && episodes[progressEpisode - 1] && (
                   <Text style={styles.episodeTitle}>
-                    "{episodes[progressEpisode - 1].name}"
+                    &quot;{episodes[progressEpisode - 1].name}&quot;
                   </Text>
                 )}
               </View>

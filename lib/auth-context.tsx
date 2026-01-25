@@ -78,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: normalizedEmail,
       password,
       options: {
+        emailRedirectTo: 'seen://auth/confirm',
         data: {
           username: trimmedUsername,
           display_name: trimmedDisplayName || null,

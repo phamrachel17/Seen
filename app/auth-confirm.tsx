@@ -76,7 +76,7 @@ export default function AuthConfirmScreen() {
             </View>
             <Text style={styles.statusTitle}>Email Confirmed!</Text>
             <Text style={styles.statusText}>
-              Your account is ready. You can now sign in and start tracking your movies.
+              Thank you for verifying. Seen is ready to be used!
             </Text>
             <Pressable
               style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}

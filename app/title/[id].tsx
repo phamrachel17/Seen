@@ -703,7 +703,7 @@ export default function TitleDetailScreen() {
                   {formatProgress(inProgressActivity) || 'Started watching'}
                 </Text>
                 {inProgressActivity.note && (
-                  <Text style={styles.progressNote}>"{inProgressActivity.note}"</Text>
+                  <Text style={styles.progressNote}>&quot;{inProgressActivity.note}&quot;</Text>
                 )}
                 {inProgressActivity.watch_date && (
                   <View style={styles.watchDateRow}>
@@ -780,7 +780,7 @@ export default function TitleDetailScreen() {
                   <Text style={styles.friendReviewText}>{activity.review_text}</Text>
                 )}
                 {activity.note && (
-                  <Text style={styles.friendNoteText}>"{activity.note}"</Text>
+                  <Text style={styles.friendNoteText}>&quot;{activity.note}&quot;</Text>
                 )}
                 {activity.watch_date && (
                   <View style={styles.watchDateRow}>

@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts } from 'expo-font';
@@ -23,10 +22,21 @@ import {
 } from '@expo-google-fonts/nanum-myeongjo';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
+import * as Sentry from '@sentry/react-native';
+import { PostHogProvider } from 'posthog-react-native';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
 import { Colors } from '@/constants/theme';
 import 'react-native-reanimated';
+
+// Initialize Sentry for crash reporting
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  tracesSampleRate: 1.0,
+  _experiments: {
+    profilesSampleRate: 1.0,
+  },
+});
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -188,7 +198,7 @@ function RootLayoutNav() {
   );
 }
 
-export default function RootLayout() {
+export default Sentry.wrap(function RootLayout() {
   const [fontsLoaded] = useFonts({
     LibreBaskerville_400Regular,
     LibreBaskerville_700Bold,
@@ -213,12 +223,21 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <CacheProvider>
-        <AuthProvider>
-          <RootLayoutNav />
-        </AuthProvider>
-      </CacheProvider>
-    </GestureHandlerRootView>
+    <PostHogProvider
+      apiKey={process.env.EXPO_PUBLIC_POSTHOG_API_KEY!}
+      options={{
+        host: process.env.EXPO_PUBLIC_POSTHOG_HOST,
+        enableSessionReplay: true,
+      }}
+      autocapture
+    >
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <CacheProvider>
+          <AuthProvider>
+            <RootLayoutNav />
+          </AuthProvider>
+        </CacheProvider>
+      </GestureHandlerRootView>
+    </PostHogProvider>
   );
-}
+});

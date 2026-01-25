@@ -196,7 +196,7 @@ export default function FriendPickerModal() {
       ) : (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
-            No friends match "{searchQuery}"
+            No friends match &quot;{searchQuery}&quot;
           </Text>
         </View>
       )}

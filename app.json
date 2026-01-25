@@ -4,13 +4,16 @@
     "slug": "seen",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/manAndTv.jpg",
     "scheme": "seen",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.seenapp.seen"
+      "bundleIdentifier": "com.seenapp.seen",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -41,7 +44,17 @@
         }
       ],
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "@sentry/react-native",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "seen",
+          "organization": "rachel-pham"
+        }
+      ],
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,

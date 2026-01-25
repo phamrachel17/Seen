@@ -200,7 +200,7 @@ export default function ActivityHistoryScreen() {
           )}
 
           {!isCompleted && activity.note && (
-            <Text style={styles.noteText}>"{activity.note}"</Text>
+            <Text style={styles.noteText}>&quot;{activity.note}&quot;</Text>
           )}
 
           {/* Tagged friends */}
