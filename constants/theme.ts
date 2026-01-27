@@ -3,7 +3,7 @@
  */
 export const Colors = {
   // Core palette
-  paper: '#EEE4D3',      // Main background
+  paper: '#EAE2D5',      // Main background
   dust: '#C4BFAF',       // Secondary backgrounds, borders
   ink: '#2C3E50',        // Navy accent
   handwriting: '#1E1E1E', // Primary text
@@ -11,7 +11,7 @@ export const Colors = {
   settledTea: '#C98540', // Secondary accent
 
   // Semantic aliases
-  background: '#EEE4D3',
+  background: '#EAE2D5',
   backgroundSecondary: '#C4BFAF',
   text: '#1E1E1E',
   textSecondary: '#2C3E50',
