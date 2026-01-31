@@ -17,7 +17,8 @@ export default function AuthConfirmScreen() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    if (token_hash) {
+    // Validate token_hash is a non-empty string (not array or undefined)
+    if (typeof token_hash === 'string' && token_hash.length > 0) {
       verifyEmail();
     } else {
       setStatus('error');
@@ -27,9 +28,13 @@ export default function AuthConfirmScreen() {
 
   const verifyEmail = async () => {
     try {
+      // Type assertion is safe here since we validate in useEffect
+      const tokenHashStr = token_hash as string;
+      const typeStr = typeof type === 'string' ? type : 'signup';
+
       const { error } = await supabase.auth.verifyOtp({
-        token_hash: token_hash as string,
-        type: (type as 'signup' | 'email') || 'signup',
+        token_hash: tokenHashStr,
+        type: (typeStr as 'signup' | 'email') || 'signup',
       });
 
       if (error) {

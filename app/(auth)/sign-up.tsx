@@ -73,6 +73,23 @@ export default function SignUpScreen() {
       return;
     }
 
+    // Username character validation (alphanumeric and underscore only)
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      setUsernameError('Username can only contain letters, numbers, and underscores');
+      return;
+    }
+
+    // Username length validation
+    if (trimmedUsername.length < 3) {
+      setUsernameError('Username must be at least 3 characters');
+      return;
+    }
+
+    if (trimmedUsername.length > 30) {
+      setUsernameError('Username must be 30 characters or less');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setPasswordError('Passwords do not match');
       return;

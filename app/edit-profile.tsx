@@ -29,6 +29,7 @@ export default function EditProfileModal() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [username, setUsername] = useState('');
   const [originalUsername, setOriginalUsername] = useState('');
@@ -170,9 +171,14 @@ export default function EditProfileModal() {
       let finalImageUrl = imageUrl;
 
       if (localImageUri) {
-        const uploadedUrl = await uploadImage();
-        if (uploadedUrl) {
-          finalImageUrl = uploadedUrl;
+        setIsUploadingImage(true);
+        try {
+          const uploadedUrl = await uploadImage();
+          if (uploadedUrl) {
+            finalImageUrl = uploadedUrl;
+          }
+        } finally {
+          setIsUploadingImage(false);
         }
       }
 
@@ -300,13 +306,18 @@ export default function EditProfileModal() {
           style={({ pressed }) => [
             styles.saveButton,
             pressed && styles.saveButtonPressed,
-            isSaving && styles.saveButtonDisabled,
+            (isSaving || isUploadingImage) && styles.saveButtonDisabled,
           ]}
           onPress={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || isUploadingImage}
         >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={Colors.paper} />
+          {isSaving || isUploadingImage ? (
+            <View style={styles.savingContainer}>
+              <ActivityIndicator size="small" color={Colors.paper} />
+              {isUploadingImage && (
+                <Text style={styles.savingText}>Uploading image...</Text>
+              )}
+            </View>
           ) : (
             <Text style={styles.saveButtonText}>Save Changes</Text>
           )}
@@ -449,6 +460,16 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
+    color: Colors.paper,
+  },
+  savingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  savingText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
     color: Colors.paper,
   },
 });

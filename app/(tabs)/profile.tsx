@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -45,11 +45,11 @@ export default function ProfileScreen() {
   const [watchlistCount, setWatchlistCount] = useState(0);
   const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
 
+  // Ref to track if component is mounted (prevents state updates after unmount)
+  const isMountedRef = useRef(true);
+
   const loadUserData = useCallback(async () => {
     if (!user) return;
-
-    // Track mounted state to prevent state updates after unmount
-    let isMounted = true;
 
     try {
       // Load profile data (for local display - cached version is used as fallback)
@@ -59,7 +59,7 @@ export default function ProfileScreen() {
         .eq('id', user.id)
         .single();
 
-      if (isMounted && profile) {
+      if (isMountedRef.current && profile) {
         setProfileData(profile);
       }
 
@@ -69,7 +69,7 @@ export default function ProfileScreen() {
         .select('content_type')
         .eq('user_id', user.id);
 
-      if (isMounted && !rankingsError && rankings) {
+      if (isMountedRef.current && !rankingsError && rankings) {
         const movieCount = rankings.filter(r => r.content_type === 'movie').length;
         const showCount = rankings.filter(r => r.content_type === 'tv').length;
         setLocalStats({ totalMovies: movieCount, totalShows: showCount });
@@ -81,14 +81,14 @@ export default function ProfileScreen() {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      if (isMounted) {
+      if (isMountedRef.current) {
         setWatchlistCount(wlCount || 0);
       }
 
       // Load currently watching count
       const inProgressActivities = await getUserActivities(user.id, 'in_progress');
 
-      if (isMounted) {
+      if (isMountedRef.current) {
         // Deduplicate by content_id FIRST to match display logic in currently-watching screen
         const uniqueContent = new Map<number, any>();
         for (const activity of inProgressActivities) {
@@ -115,7 +115,7 @@ export default function ProfileScreen() {
         .order('created_at', { ascending: false })
         .limit(6);
 
-      if (isMounted && !activityError && activityData) {
+      if (isMountedRef.current && !activityError && activityData) {
         const activitiesWithContent = activityData.filter(
           (item: Activity) => item.content
         ) as Activity[];
@@ -124,16 +124,16 @@ export default function ProfileScreen() {
     } catch (error) {
       console.error('Error loading user data:', error);
     }
-
-    // Return cleanup function to mark as unmounted
-    return () => {
-      isMounted = false;
-    };
   }, [user]);
 
   useFocusEffect(
     useCallback(() => {
+      isMountedRef.current = true;
       loadUserData();
+
+      return () => {
+        isMountedRef.current = false;
+      };
     }, [loadUserData])
   );
 
@@ -143,7 +143,10 @@ export default function ProfileScreen() {
     setIsRefreshing(false);
   };
 
-  const formatWatchTime = (minutes: number) => {
+  const formatWatchTime = (minutes: number | null | undefined) => {
+    if (minutes == null || minutes <= 0) {
+      return '0h';
+    }
     const days = Math.floor(minutes / (24 * 60));
     const hours = Math.floor((minutes % (24 * 60)) / 60);
     const mins = minutes % 60;
@@ -160,10 +163,10 @@ export default function ProfileScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.iconButton}>
-          <IconSymbol name="ellipsis" size={22} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Seen</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle}>Seen</Text>
+          <Text style={styles.headerSubtitle}>YOUR PROFILE</Text>
+        </View>
         <Pressable style={styles.iconButton} onPress={() => router.push('/settings')}>
           <View style={styles.settingsIcon}>
             <IconSymbol name="gearshape" size={18} color={Colors.textMuted} />
@@ -376,14 +379,24 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
+  },
+  headerTextContainer: {
+    flex: 1,
   },
   headerTitle: {
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes['3xl'],
     color: Colors.stamp,
+  },
+  headerSubtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    marginTop: Spacing.xs,
   },
   iconButton: {
     padding: Spacing.xs,
@@ -405,6 +418,7 @@ const styles = StyleSheet.create({
   profileSection: {
     flexDirection: 'row',
     paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.lg,
     marginBottom: Spacing.xl,
     gap: Spacing.lg,
   },

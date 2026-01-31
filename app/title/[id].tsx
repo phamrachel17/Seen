@@ -77,7 +77,7 @@ export default function TitleDetailScreen() {
   const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [totalRankingsCount, setTotalRankingsCount] = useState<number>(0);
-  const [friendsActivities, setFriendsActivities] = useState<Activity[]>([]);
+  const [friendsActivities, setFriendsActivities] = useState<(Activity & { totalWatchCount?: number })[]>([]);
 
   // Community rating
   const [communityRating, setCommunityRating] = useState<{
@@ -175,7 +175,38 @@ export default function TitleDetailScreen() {
       setIsInProgress(!!inProgress);
       setIsBookmarked(!!bookmark);
       setUserRanking(ranking);
-      setFriendsActivities(friendsActs.slice(0, 5)); // Limit to 5 friends
+      // Count total watches per friend and deduplicate by user_id
+      // (friendsActs is already sorted by created_at DESC)
+      const watchCountPerFriend = new Map<string, number>();
+      const latestPerFriend = new Map<string, Activity>();
+
+      for (const activity of friendsActs) {
+        // Count watches per friend (count unique watch_ids)
+        const watchKey = `${activity.user_id}-${activity.watch_id || 'legacy'}`;
+        if (!watchCountPerFriend.has(watchKey)) {
+          watchCountPerFriend.set(watchKey, 1);
+        }
+
+        // Keep only the most recent activity per friend
+        if (!latestPerFriend.has(activity.user_id)) {
+          latestPerFriend.set(activity.user_id, activity);
+        }
+      }
+
+      // Calculate total watch count per friend
+      const friendWatchCounts = new Map<string, number>();
+      for (const key of watchCountPerFriend.keys()) {
+        const friendId = key.split('-')[0];
+        friendWatchCounts.set(friendId, (friendWatchCounts.get(friendId) || 0) + 1);
+      }
+
+      // Add watchCount to each activity for display
+      const activitiesWithCounts = Array.from(latestPerFriend.values()).map(activity => ({
+        ...activity,
+        totalWatchCount: friendWatchCounts.get(activity.user_id) || 1,
+      }));
+
+      setFriendsActivities(activitiesWithCounts.slice(0, 5));
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -793,6 +824,15 @@ export default function TitleDetailScreen() {
                     </Text>
                   </View>
                 )}
+                {/* View all watches link */}
+                <Pressable
+                  style={styles.viewAllWatchesLink}
+                  onPress={() => router.push(`/activity-history/${content?.id}?userId=${activity.user_id}`)}
+                >
+                  <Text style={styles.viewAllWatchesText}>
+                    View watch history →
+                  </Text>
+                </Pressable>
               </View>
             ))}
           </View>
@@ -1277,5 +1317,16 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.textMuted,
     fontStyle: 'italic',
+  },
+  viewAllWatchesLink: {
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
+  },
+  viewAllWatchesText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.stamp,
   },
 });

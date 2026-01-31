@@ -61,17 +61,26 @@ function RootLayoutNav() {
   // Handle deep links for email confirmation
   useEffect(() => {
     const handleDeepLink = (event: { url: string }) => {
-      const url = event.url;
-      if (url.includes('auth/confirm') || url.includes('token_hash')) {
-        const params = Linking.parse(url);
-        const tokenHash = params.queryParams?.token_hash as string | undefined;
-        const type = params.queryParams?.type as string | undefined;
-        if (tokenHash) {
-          router.push({
-            pathname: '/auth-confirm',
-            params: { token_hash: tokenHash, type: type || 'signup' },
-          });
+      try {
+        const url = event.url;
+        if (url.includes('auth/confirm') || url.includes('token_hash')) {
+          const params = Linking.parse(url);
+          const tokenHash = params.queryParams?.token_hash;
+          const type = params.queryParams?.type;
+          // Validate token_hash is a string (not array or undefined)
+          if (typeof tokenHash === 'string' && tokenHash.length > 0) {
+            router.push({
+              pathname: '/auth-confirm',
+              params: {
+                token_hash: tokenHash,
+                type: typeof type === 'string' ? type : 'signup'
+              },
+            });
+          }
         }
+      } catch (error) {
+        // Silently handle malformed deep links
+        console.warn('Failed to parse deep link:', error);
       }
     };
 
@@ -79,9 +88,13 @@ function RootLayoutNav() {
     const subscription = Linking.addEventListener('url', handleDeepLink);
 
     // Handle deep link that opened the app
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink({ url });
-    });
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) handleDeepLink({ url });
+      })
+      .catch((error) => {
+        console.warn('Failed to get initial URL:', error);
+      });
 
     return () => subscription.remove();
   }, [router]);

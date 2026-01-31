@@ -26,27 +26,25 @@ export default function LandingScreen() {
       </View>
 
       {/* Buttons */}
-      <View style={[styles.buttonContainer, { paddingBottom: insets.bottom + Spacing.xl }]}>
+      <View style={[styles.buttonContainer, { paddingBottom: insets.bottom + Spacing['3xl'] }]}>
         <Pressable
           style={({ pressed }) => [
             styles.button,
-            styles.buttonOutline,
             pressed && styles.buttonPressed,
           ]}
           onPress={() => router.push('/(auth)/sign-up')}
         >
-          <Text style={styles.buttonOutlineText}>Sign Up</Text>
+          <Text style={styles.buttonText}>Sign Up</Text>
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [
             styles.button,
-            styles.buttonOutline,
             pressed && styles.buttonPressed,
           ]}
           onPress={() => router.push('/(auth)/sign-in')}
         >
-          <Text style={styles.buttonOutlineText}>Log In</Text>
+          <Text style={styles.buttonText}>Log In</Text>
         </Pressable>
       </View>
     </View>
@@ -89,28 +87,25 @@ const styles = StyleSheet.create({
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: Spacing.xl,
+    gap: Spacing.lg,
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.xl,
+    marginTop: -Spacing['2xl'],
   },
   button: {
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing['3xl'],
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing['2xl'],
     borderRadius: BorderRadius.md,
-    minWidth: 140,
-    alignItems: 'center',
-  },
-  buttonOutline: {
-    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: Colors.handwriting,
-  },
-  buttonOutlineText: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.lg,
-    color: Colors.handwriting,
+    borderColor: Colors.stamp,
+    alignItems: 'center',
+    minWidth: 120,
   },
   buttonPressed: {
     opacity: 0.7,
+  },
+  buttonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
   },
 });

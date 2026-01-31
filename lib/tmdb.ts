@@ -194,7 +194,7 @@ interface TMDBTVSearchResponse {
 export function getImageUrl(
   path: string | null,
   type: 'poster' | 'backdrop' = 'poster',
-  size: keyof typeof ImageSize.poster = 'medium'
+  size: keyof typeof ImageSize.poster = 'large'
 ): string {
   if (!path) {
     return '';
@@ -292,11 +292,15 @@ export async function getMovieDetails(movieId: number): Promise<MovieDetails> {
     tmdbFetch<TMDBCredits>(`/movie/${movieId}/credits`),
   ]);
 
+  // Validate credits arrays exist before accessing
+  const castArray = Array.isArray(creditsData?.cast) ? creditsData.cast : [];
+  const crewArray = Array.isArray(creditsData?.crew) ? creditsData.crew : [];
+
   // Find director from credits
-  const director = creditsData.crew.find((c) => c.job === 'Director')?.name;
+  const director = crewArray.find((c) => c.job === 'Director')?.name;
 
   // Extract top 10 cast members sorted by billing order
-  const cast: CastMember[] = creditsData.cast
+  const cast: CastMember[] = castArray
     .sort((a, b) => a.order - b.order)
     .slice(0, 10)
     .map((c) => ({
@@ -308,7 +312,7 @@ export async function getMovieDetails(movieId: number): Promise<MovieDetails> {
 
   // Extract key crew members (deduplicated by id)
   const seenCrewIds = new Set<number>();
-  const crew: CrewMember[] = creditsData.crew
+  const crew: CrewMember[] = crewArray
     .filter((c) => KEY_CREW_JOBS.includes(c.job))
     .filter((c) => {
       if (seenCrewIds.has(c.id)) return false;
@@ -466,8 +470,12 @@ export async function getTVShowDetails(showId: number): Promise<TVShowDetails> {
   // Find creator from created_by field
   const creator = showData.created_by?.[0]?.name;
 
+  // Validate credits arrays exist before accessing
+  const castArray = Array.isArray(creditsData?.cast) ? creditsData.cast : [];
+  const crewArray = Array.isArray(creditsData?.crew) ? creditsData.crew : [];
+
   // Extract top 10 cast members
-  const cast: CastMember[] = creditsData.cast
+  const cast: CastMember[] = castArray
     .sort((a, b) => a.order - b.order)
     .slice(0, 10)
     .map((c) => ({
@@ -479,7 +487,7 @@ export async function getTVShowDetails(showId: number): Promise<TVShowDetails> {
 
   // Extract key crew members
   const seenCrewIds = new Set<number>();
-  const crew: CrewMember[] = creditsData.crew
+  const crew: CrewMember[] = crewArray
     .filter((c) => KEY_CREW_JOBS.includes(c.job) || c.job === 'Executive Producer')
     .filter((c) => {
       if (seenCrewIds.has(c.id)) return false;

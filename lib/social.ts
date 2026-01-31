@@ -278,7 +278,8 @@ export async function getNotifications(
   }
 
   // For notifications with review_id (which maps to activity_id), fetch activity and content info
-  const notificationsWithContent = await Promise.all(
+  // Use Promise.allSettled to handle individual fetch failures gracefully
+  const results = await Promise.allSettled(
     data.map(async (notification) => {
       if (notification.review_id) {
         // Fetch activity to get content_id
@@ -302,6 +303,11 @@ export async function getNotifications(
       return notification;
     })
   );
+
+  // Filter out failed fetches and extract successful results
+  const notificationsWithContent = results
+    .filter((result): result is PromiseFulfilledResult<typeof data[0]> => result.status === 'fulfilled')
+    .map((result) => result.value);
 
   return notificationsWithContent as Notification[];
 }

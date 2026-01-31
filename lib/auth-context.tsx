@@ -61,6 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email = foundEmail;
     }
 
+    // Clear cache before sign-in to prevent data leakage between accounts
+    cache.clear();
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,

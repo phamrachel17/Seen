@@ -167,51 +167,54 @@ export default function NotificationsScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: Notification }) => (
-    <Pressable
-      style={({ pressed }) => [
-        styles.notificationItem,
-        !item.read && styles.unread,
-        pressed && styles.pressed,
-      ]}
-      onPress={() => handleNotificationPress(item)}
-    >
-      <View style={styles.avatarContainer}>
-        <ProfileAvatar
-          imageUrl={item.actor?.profile_image_url}
-          username={item.actor?.username || '?'}
-          size="small"
-          variant="circle"
-        />
-        <View
-          style={[
-            styles.iconBadge,
-            { backgroundColor: getNotificationIconColor(item.type) },
-          ]}
-        >
-          <IconSymbol
-            name={getNotificationIcon(item.type)}
-            size={10}
-            color={Colors.white}
+  const renderItem = useCallback(
+    ({ item }: { item: Notification }) => (
+      <Pressable
+        style={({ pressed }) => [
+          styles.notificationItem,
+          !item.read && styles.unread,
+          pressed && styles.pressed,
+        ]}
+        onPress={() => handleNotificationPress(item)}
+      >
+        <View style={styles.avatarContainer}>
+          <ProfileAvatar
+            imageUrl={item.actor?.profile_image_url}
+            username={item.actor?.username || '?'}
+            size="small"
+            variant="circle"
           />
+          <View
+            style={[
+              styles.iconBadge,
+              { backgroundColor: getNotificationIconColor(item.type) },
+            ]}
+          >
+            <IconSymbol
+              name={getNotificationIcon(item.type)}
+              size={10}
+              color={Colors.white}
+            />
+          </View>
         </View>
-      </View>
 
-      <View style={styles.notificationContent}>
-        <Text style={[styles.notificationText, !item.read && styles.unreadText]}>
-          {getNotificationText(item)}
-        </Text>
-        <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
-      </View>
+        <View style={styles.notificationContent}>
+          <Text style={[styles.notificationText, !item.read && styles.unreadText]}>
+            {getNotificationText(item)}
+          </Text>
+          <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
+        </View>
 
-      {(item.activity?.content?.poster_url || item.review?.movies?.poster_url) && (
-        <Image
-          source={{ uri: item.activity?.content?.poster_url || item.review?.movies?.poster_url }}
-          style={styles.movieThumb}
-          contentFit="cover"
-        />
-      )}
-    </Pressable>
+        {(item.activity?.content?.poster_url || item.review?.movies?.poster_url) && (
+          <Image
+            source={{ uri: item.activity?.content?.poster_url || item.review?.movies?.poster_url }}
+            style={styles.movieThumb}
+            contentFit="cover"
+          />
+        )}
+      </Pressable>
+    ),
+    []
   );
 
   const renderEmpty = () => {

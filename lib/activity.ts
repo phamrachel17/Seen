@@ -453,26 +453,37 @@ export function getProgressPercent(activity: Activity): number {
   if (activity.status !== 'in_progress') return 0;
 
   const content = activity.content;
-  if (!content) return 0;
+  if (!content) return 1; // Has in_progress status but no content - still show it
 
   if (content.content_type === 'movie') {
     if (activity.progress_minutes && content.runtime_minutes) {
-      return Math.min(100, Math.round((activity.progress_minutes / content.runtime_minutes) * 100));
+      return Math.min(99, Math.round((activity.progress_minutes / content.runtime_minutes) * 100));
     }
+    // Movie is in_progress but no specific progress data - return 1%
+    return 1;
   } else if (content.content_type === 'tv') {
-    if (activity.progress_season && activity.progress_episode && content.total_episodes) {
-      // Rough calculation based on total episodes
-      // This would need season data for accuracy
-      const estimatedWatched = (activity.progress_season - 1) * 10 + activity.progress_episode;
-      return Math.min(100, Math.round((estimatedWatched / content.total_episodes) * 100));
+    // For TV shows with episode progress
+    if (activity.progress_season && activity.progress_episode) {
+      // If we have total_episodes, calculate percentage
+      if (content.total_episodes && content.total_episodes > 0) {
+        const estimatedWatched = (activity.progress_season - 1) * 10 + activity.progress_episode;
+        // Use Math.max(1, ...) to ensure at least 1% for any episode progress
+        return Math.min(99, Math.max(1, Math.round((estimatedWatched / content.total_episodes) * 100)));
+      }
+      // No total_episodes data - return 1% to ensure it appears in Currently Watching
+      return 1;
     }
+    // TV show is in_progress but no episode data - return 1%
+    return 1;
   }
 
-  return 0;
+  // Fallback for any in_progress activity
+  return 1;
 }
 
 // Check if activity is truly in progress (< 100%)
 export function isActivityInProgress(activity: Activity): boolean {
+  if (activity.status !== 'in_progress') return false;
   const percent = getProgressPercent(activity);
   return percent > 0 && percent < 100;
 }

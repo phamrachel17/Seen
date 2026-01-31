@@ -258,6 +258,11 @@ export function PickForMeModal({ visible, onClose, initialContentType = 'movie' 
             contentContainerStyle={styles.filterContent}
             showsVerticalScrollIndicator={false}
           >
+            {/* Feature explanation */}
+            <Text style={styles.subtitle}>
+              Can't decide what to watch? We'll suggest something based on your taste and what your friends love.
+            </Text>
+
             {/* Error Message */}
             {errorMessage && (
               <View style={styles.errorContainer}>
@@ -546,6 +551,14 @@ const styles = StyleSheet.create({
   filterContent: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing['3xl'],
+  },
+  subtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginBottom: Spacing.xl,
+    lineHeight: 20,
   },
   errorContainer: {
     backgroundColor: Colors.error + '20',

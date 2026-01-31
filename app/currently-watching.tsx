@@ -8,7 +8,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -20,15 +20,20 @@ export default function CurrentlyWatchingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { userId } = useLocalSearchParams<{ userId?: string }>();
+
+  // Use provided userId or fall back to current user
+  const targetUserId = userId || user?.id;
+  const isOwnList = !userId || userId === user?.id;
 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadData = useCallback(async () => {
-    if (!user) return;
+    if (!targetUserId) return;
     try {
-      const data = await getUserActivities(user.id, 'in_progress');
+      const data = await getUserActivities(targetUserId, 'in_progress');
 
       // Deduplicate by content_id FIRST, keeping the most recent activity per content
       // (data is already sorted by created_at DESC)
@@ -47,12 +52,12 @@ export default function CurrentlyWatchingScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [targetUserId]);
 
   useFocusEffect(
     useCallback(() => {
-      if (user) loadData();
-    }, [user, loadData])
+      if (targetUserId) loadData();
+    }, [targetUserId, loadData])
   );
 
   const onRefresh = async () => {
@@ -72,7 +77,9 @@ export default function CurrentlyWatchingScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Currently Watching</Text>
+        <Text style={styles.headerTitle}>
+          {isOwnList ? 'Currently Watching' : 'Their Currently Watching'}
+        </Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -92,7 +99,9 @@ export default function CurrentlyWatchingScreen() {
         {!isLoading && activities.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
-              Nothing in progress. Start watching something and track your progress!
+              {isOwnList
+                ? 'Nothing in progress. Start watching something and track your progress!'
+                : 'Nothing currently in progress.'}
             </Text>
           </View>
         ) : (

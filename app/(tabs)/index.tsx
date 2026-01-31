@@ -91,8 +91,11 @@ export default function FeedScreen() {
     router.push('/notifications');
   };
 
-  const renderItem = ({ item }: { item: Activity }) => (
-    <ActivityFeedCard activity={item} refreshKey={refreshKey} />
+  const renderItem = useCallback(
+    ({ item }: { item: Activity }) => (
+      <ActivityFeedCard activity={item} refreshKey={refreshKey} />
+    ),
+    [refreshKey]
   );
 
   const renderEmpty = () => {

@@ -180,15 +180,18 @@ export default function FollowListModal() {
   const currentUsers = activeTab === 'followers' ? followersData : followingData;
   const isLoading = activeTab === 'followers' ? followersLoading : followingLoading;
 
-  const renderUserItem = ({ item }: { item: UserSearchResult }) => (
-    <UserListItem
-      user={item}
-      currentUserId={user?.id || ''}
-      isFollowing={followingIds.has(item.id)}
-      isLoading={loadingFollowIds.has(item.id)}
-      onFollowPress={() => handleFollowPress(item.id)}
-      onUserPress={() => handleUserPress(item.id)}
-    />
+  const renderUserItem = useCallback(
+    ({ item }: { item: UserSearchResult }) => (
+      <UserListItem
+        user={item}
+        currentUserId={user?.id || ''}
+        isFollowing={followingIds.has(item.id)}
+        isLoading={loadingFollowIds.has(item.id)}
+        onFollowPress={() => handleFollowPress(item.id)}
+        onUserPress={() => handleUserPress(item.id)}
+      />
+    ),
+    [user?.id, followingIds, loadingFollowIds, handleFollowPress, handleUserPress]
   );
 
   return (

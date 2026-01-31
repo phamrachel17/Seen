@@ -21,7 +21,6 @@ import { FriendsWatchingRow } from '@/components/friends-watching-row';
 import { InlineDropdown } from '@/components/inline-dropdown';
 import { PersonCombobox } from '@/components/person-combobox';
 import { VideoSpotlight } from '@/components/video-spotlight';
-import { PickForMeButton } from '@/components/pick-for-me-button';
 import { PickForMeModal } from '@/components/pick-for-me-modal';
 import {
   searchAll,
@@ -560,23 +559,38 @@ export default function DiscoverScreen() {
 
       {/* Search bar and Filters */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <IconSymbol name="magnifyingglass" size={18} color={Colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={searchMode === 'people' ? 'Search friends...' : 'Search movies & TV...'}
-            placeholderTextColor={Colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            blurOnSubmit
-            onSubmitEditing={Keyboard.dismiss}
-          />
-          {searchQuery.length > 0 && (
-            <Pressable onPress={clearSearch} hitSlop={8}>
-              <IconSymbol name="xmark" size={18} color={Colors.textMuted} />
+        <View style={styles.searchRow}>
+          <View style={styles.searchBar}>
+            <IconSymbol name="magnifyingglass" size={18} color={Colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={searchMode === 'people' ? 'Search friends...' : 'Search movies & TV...'}
+              placeholderTextColor={Colors.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+            />
+            {searchQuery.length > 0 && (
+              <Pressable onPress={clearSearch} hitSlop={8}>
+                <IconSymbol name="xmark" size={18} color={Colors.textMuted} />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Pick for Me icon - only show in movies/tv mode */}
+          {searchMode !== 'people' && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.pickForMeIcon,
+                pressed && styles.pickForMeIconPressed,
+              ]}
+              onPress={() => setShowPickForMeModal(true)}
+            >
+              <IconSymbol name="wand.and.stars" size={22} color={Colors.stamp} />
             </Pressable>
           )}
         </View>
@@ -588,7 +602,12 @@ export default function DiscoverScreen() {
               styles.toggleSegment,
               searchMode === 'movies' && styles.toggleSegmentActive,
             ]}
-            onPress={() => setSearchMode('movies')}
+            onPress={() => {
+              setSearchMode('movies');
+              setActiveGenre(null);
+              setActivePerson(null);
+              setFilteredMovies([]);
+            }}
           >
             <Text
               style={[
@@ -604,7 +623,12 @@ export default function DiscoverScreen() {
               styles.toggleSegment,
               searchMode === 'tv' && styles.toggleSegmentActive,
             ]}
-            onPress={() => setSearchMode('tv')}
+            onPress={() => {
+              setSearchMode('tv');
+              setActiveGenre(null);
+              setActivePerson(null);
+              setFilteredMovies([]);
+            }}
           >
             <Text
               style={[
@@ -620,7 +644,12 @@ export default function DiscoverScreen() {
               styles.toggleSegment,
               searchMode === 'people' && styles.toggleSegmentActive,
             ]}
-            onPress={() => setSearchMode('people')}
+            onPress={() => {
+              setSearchMode('people');
+              setActiveGenre(null);
+              setActivePerson(null);
+              setFilteredMovies([]);
+            }}
           >
             <Text
               style={[
@@ -642,7 +671,7 @@ export default function DiscoverScreen() {
                 styles.filterButton,
                 activeGenre && styles.filterButtonActive,
               ]}
-              onPress={openGenreDropdown}
+              onPress={activeGenre ? undefined : openGenreDropdown}
             >
               <Text
                 style={[
@@ -652,11 +681,19 @@ export default function DiscoverScreen() {
               >
                 {getGenreLabel()}
               </Text>
-              <IconSymbol
-                name="chevron.down"
-                size={10}
-                color={activeGenre ? Colors.white : Colors.textMuted}
-              />
+              {activeGenre ? (
+                <Pressable
+                  onPress={() => {
+                    setActiveGenre(null);
+                    setFilteredMovies([]);
+                  }}
+                  hitSlop={8}
+                >
+                  <IconSymbol name="xmark" size={12} color={Colors.white} />
+                </Pressable>
+              ) : (
+                <IconSymbol name="chevron.down" size={12} color={Colors.textMuted} />
+              )}
             </Pressable>
 
             <Pressable
@@ -684,10 +721,10 @@ export default function DiscoverScreen() {
                   }}
                   hitSlop={8}
                 >
-                  <IconSymbol name="xmark" size={10} color={Colors.white} />
+                  <IconSymbol name="xmark" size={12} color={Colors.white} />
                 </Pressable>
               ) : (
-                <IconSymbol name="chevron.down" size={10} color={Colors.textMuted} />
+                <IconSymbol name="chevron.down" size={12} color={Colors.textMuted} />
               )}
             </Pressable>
           </View>
@@ -737,7 +774,6 @@ export default function DiscoverScreen() {
                 }
               }}
             />
-            <PickForMeButton onPress={() => setShowPickForMeModal(true)} />
           </>
         )}
 
@@ -963,7 +999,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: Fonts.serifBold,
-    fontSize: FontSizes['2xl'],
+    fontSize: FontSizes['3xl'],
     color: Colors.stamp,
   },
   headerActions: {
@@ -992,73 +1028,101 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   searchContainer: {
-    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
     gap: Spacing.md,
   },
-  searchBar: {
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
     gap: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.dust,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+  },
+  pickForMeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.stamp,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickForMeIconPressed: {
+    opacity: 0.7,
+    backgroundColor: Colors.dust,
   },
   searchInput: {
     flex: 1,
     fontFamily: Fonts.sans,
     fontSize: FontSizes.md,
     color: Colors.text,
+    paddingVertical: 0,
   },
   primaryToggle: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: Spacing.xs,
+    justifyContent: 'flex-start',
+    gap: Spacing.md,
+    paddingBottom: Spacing.xs,
+    paddingHorizontal: Spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
   },
   toggleSegment: {
     paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.xl,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    borderRadius: 0,
+    borderWidth: 0,
     backgroundColor: 'transparent',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    marginBottom: -1,
   },
   toggleSegmentActive: {
-    backgroundColor: Colors.stamp,
-    borderColor: Colors.stamp,
+    borderBottomColor: Colors.stamp,
   },
   toggleText: {
     fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.xs,
+    fontSize: FontSizes.sm,
     color: Colors.textMuted,
   },
   toggleTextActive: {
-    color: Colors.white,
+    color: Colors.stamp,
   },
   filterButtons: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
   },
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.sm,
+    minHeight: 28,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.cardBackground,
-    gap: 4,
+    gap: Spacing.xs,
   },
   filterButtonActive: {
-    backgroundColor: Colors.settledTea,
-    borderColor: Colors.settledTea,
+    backgroundColor: Colors.stamp,
+    borderColor: Colors.stamp,
   },
   filterButtonText: {
     fontFamily: Fonts.sans,

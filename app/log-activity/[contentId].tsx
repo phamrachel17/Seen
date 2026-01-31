@@ -468,7 +468,6 @@ export default function LogActivityModal() {
   // Completed form state
   const [starRating, setStarRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
-  const [ratedSeason, setRatedSeason] = useState<number | undefined>(undefined);
   const [skipRanking, setSkipRanking] = useState(false);  // Skip ranking flow on save
 
   // In Progress form state
@@ -574,7 +573,6 @@ export default function LogActivityModal() {
           setExistingCompleted(completed);
           setStarRating(completed.star_rating || 0);
           setReviewText(completed.review_text || '');
-          setRatedSeason(completed.rated_season);
           if (completed.tagged_friends) {
             setTaggedFriends(completed.tagged_friends);
           }
@@ -709,7 +707,7 @@ export default function LogActivityModal() {
           watchDate,
           taggedFriends,
           isPrivate,
-          ratedSeason: content.content_type === 'tv' ? ratedSeason : undefined,
+          ratedSeason: undefined,  // Always rank overall show, not per-season
         });
       } else {
         // CREATE new activity (in_progress, or completed for first time)
@@ -733,9 +731,7 @@ export default function LogActivityModal() {
           watchDate,
           taggedFriends,
           isPrivate,
-          ratedSeason: selectedStatus === 'completed' && content.content_type === 'tv'
-            ? ratedSeason
-            : undefined,
+          ratedSeason: undefined,  // Always rank overall show, not per-season
           // Link to active watch for in_progress activities
           watchId: selectedStatus === 'in_progress' ? activeWatch?.id : undefined,
         });
@@ -1124,47 +1120,6 @@ export default function LogActivityModal() {
               </View>
             )}
 
-            {/* TV Season Rating - hidden when editing details only */}
-            {!skipRanking && contentType === 'tv' && totalSeasons > 1 && (
-              <View style={styles.seasonRatingSection}>
-                <Text style={styles.sectionLabel}>RATING FOR</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.seasonPills}>
-                    <Pressable
-                      style={[
-                        styles.seasonPill,
-                        ratedSeason === undefined && styles.seasonPillSelected,
-                      ]}
-                      onPress={() => setRatedSeason(undefined)}
-                    >
-                      <Text style={[
-                        styles.seasonPillText,
-                        ratedSeason === undefined && styles.seasonPillTextSelected,
-                      ]}>
-                        Overall
-                      </Text>
-                    </Pressable>
-                    {Array.from({ length: totalSeasons }, (_, i) => i + 1).map((season) => (
-                      <Pressable
-                        key={season}
-                        style={[
-                          styles.seasonPill,
-                          ratedSeason === season && styles.seasonPillSelected,
-                        ]}
-                        onPress={() => setRatedSeason(season)}
-                      >
-                        <Text style={[
-                          styles.seasonPillText,
-                          ratedSeason === season && styles.seasonPillTextSelected,
-                        ]}>
-                          S{season}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-              </View>
-            )}
 
             {/* Review Text */}
             <View style={styles.textSection}>

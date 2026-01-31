@@ -41,8 +41,11 @@ export default function UserProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user: currentUser } = useAuth();
-  const { id: userId } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string }>();
   const { invalidate } = useCache();
+
+  // Validate userId param - could be undefined or array
+  const userId = typeof params.id === 'string' ? params.id : undefined;
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -137,38 +140,44 @@ export default function UserProfileScreen() {
   };
 
   const handleFollowPress = async () => {
+    // Check loading state FIRST, before any state updates
     if (!currentUser || !userId || isFollowLoading) return;
 
-    // Optimistic update
-    setIsFollowing(!isFollowing);
-    setFollowCounts((prev) => ({
-      ...prev,
-      followers: isFollowing ? prev.followers - 1 : prev.followers + 1,
-    }));
+    // Capture current state before any updates
+    const wasFollowing = isFollowing;
+
+    // Set loading state immediately to prevent rapid clicks
     setIsFollowLoading(true);
 
+    // Optimistic update
+    setIsFollowing(!wasFollowing);
+    setFollowCounts((prev) => ({
+      ...prev,
+      followers: wasFollowing ? prev.followers - 1 : prev.followers + 1,
+    }));
+
     try {
-      const success = isFollowing
+      const success = wasFollowing
         ? await unfollowUser(currentUser.id, userId)
         : await followUser(currentUser.id, userId);
 
       if (success) {
         // Invalidate caches on successful follow/unfollow
-        invalidate(isFollowing ? 'unfollow' : 'follow', currentUser.id);
+        invalidate(wasFollowing ? 'unfollow' : 'follow', currentUser.id);
       } else {
         // Revert on failure
-        setIsFollowing(isFollowing);
+        setIsFollowing(wasFollowing);
         setFollowCounts((prev) => ({
           ...prev,
-          followers: isFollowing ? prev.followers + 1 : prev.followers - 1,
+          followers: wasFollowing ? prev.followers + 1 : prev.followers - 1,
         }));
       }
     } catch (error) {
       // Revert on error
-      setIsFollowing(isFollowing);
+      setIsFollowing(wasFollowing);
       setFollowCounts((prev) => ({
         ...prev,
-        followers: isFollowing ? prev.followers + 1 : prev.followers - 1,
+        followers: wasFollowing ? prev.followers + 1 : prev.followers - 1,
       }));
     } finally {
       setIsFollowLoading(false);
@@ -259,8 +268,7 @@ export default function UserProfileScreen() {
           {/* Right: Display Name, Bio, Follow Stats, Follow Button */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
-              {profileData.display_name?.toUpperCase() ||
-                profileData.username.toUpperCase()}
+              {profileData.display_name || profileData.username}
             </Text>
             <Text style={styles.profileBio}>
               {profileData.bio || 'Film Enthusiast'}

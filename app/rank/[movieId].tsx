@@ -288,7 +288,7 @@ export default function RankingModal() {
         {/* Context */}
         <View style={styles.tierContextHeader}>
           <Text style={styles.tierContextText}>
-            Comparing with <Text style={styles.tierCountText}>{rankingState?.tierMovies.length || 0}</Text> other {'★'.repeat(starRating)} {(rankingState?.tierMovies.length || 0) === 1 ? 'film' : 'films'}
+            Comparing with <Text style={styles.tierCountText}>{rankingState?.tierMovies.length || 0}</Text> other {'★'.repeat(starRating)} {contentType === 'tv' ? ((rankingState?.tierMovies.length || 0) === 1 ? 'show' : 'shows') : ((rankingState?.tierMovies.length || 0) === 1 ? 'film' : 'films')}
           </Text>
         </View>
 

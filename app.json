@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.seenapp.seen",
+      "bundleIdentifier": "app.seen.ios",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }

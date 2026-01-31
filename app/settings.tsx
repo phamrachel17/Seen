@@ -64,6 +64,21 @@ export default function SettingsScreen() {
           <Text style={styles.settingsRowText}>Sign Out</Text>
         </Pressable>
       </View>
+
+      {/* About & Feedback - fun playful section */}
+      <Pressable
+        style={({ pressed }) => [styles.aboutSection, pressed && styles.aboutPressed]}
+        onPress={() => router.push('/about-feedback')}
+      >
+        <View style={styles.aboutContent}>
+          <Text style={styles.aboutEmoji}>💌</Text>
+          <View style={styles.aboutTextContainer}>
+            <Text style={styles.aboutTitle}>Say hi!</Text>
+            <Text style={styles.aboutSubtitle}>About & Feedback</Text>
+          </View>
+        </View>
+        <IconSymbol name="chevron.right" size={16} color={Colors.stamp} />
+      </Pressable>
     </View>
   );
 }
@@ -121,5 +136,44 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.border,
     marginHorizontal: Spacing.lg,
+  },
+  aboutSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.xl,
+    marginHorizontal: Spacing.xl,
+    backgroundColor: 'rgba(128, 47, 29, 0.08)',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.stamp,
+    borderStyle: 'dashed',
+  },
+  aboutPressed: {
+    opacity: 0.7,
+    backgroundColor: Colors.cardBackground,
+  },
+  aboutContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  aboutEmoji: {
+    fontSize: 24,
+  },
+  aboutTextContainer: {
+    gap: 2,
+  },
+  aboutTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
+  },
+  aboutSubtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
   },
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,32 +18,49 @@ import { useAuth } from '@/lib/auth-context';
 import { getContentById } from '@/lib/content';
 import { getWatchesForContent, formatProgress, deleteActivity } from '@/lib/activity';
 import { Content, Activity, WatchWithActivities } from '@/types';
+import { supabase } from '@/lib/supabase';
 
 export default function ActivityHistoryScreen() {
-  const { contentId } = useLocalSearchParams<{ contentId: string }>();
+  const { contentId, userId } = useLocalSearchParams<{ contentId: string; userId?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
 
+  // Determine if viewing own history or someone else's
+  const targetUserId = userId || user?.id;
+  const isOwnHistory = !userId || userId === user?.id;
+
   const [content, setContent] = useState<Content | null>(null);
   const [watches, setWatches] = useState<WatchWithActivities[]>([]);
+  const [targetUser, setTargetUser] = useState<{ username: string; display_name?: string | null } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAllWatches, setShowAllWatches] = useState(false);
 
   useEffect(() => {
-    if (contentId && user) {
+    if (contentId && targetUserId) {
       loadData(parseInt(contentId, 10));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentId, user]);
+  }, [contentId, targetUserId]);
 
   const loadData = async (id: number) => {
     try {
       setIsLoading(true);
 
+      // If viewing another user's history, fetch their profile
+      if (!isOwnHistory && userId) {
+        const { data: userData } = await supabase
+          .from('profiles')
+          .select('username, display_name')
+          .eq('id', userId)
+          .single();
+        setTargetUser(userData);
+      }
+
       const [contentData, watchesData] = await Promise.all([
         getContentById(id),
-        user ? getWatchesForContent(user.id, id) : [],
+        targetUserId ? getWatchesForContent(targetUserId, id) : [],
       ]);
 
       setContent(contentData);
@@ -158,90 +175,102 @@ export default function ActivityHistoryScreen() {
     );
   };
 
-  const renderActivityCard = ({ item: activity }: { item: Activity }) => {
-    const isCompleted = activity.status === 'completed';
+  const renderActivityCard = useCallback(
+    ({ item: activity }: { item: Activity }) => {
+      const isCompleted = activity.status === 'completed';
 
-    return (
-      <View style={styles.activityCard}>
-        <Text style={styles.activityDate}>{formatDate(activity.created_at)}</Text>
+      return (
+        <View style={styles.activityCard}>
+          <Text style={styles.activityDate}>{formatDate(activity.created_at)}</Text>
 
-        <View style={styles.activityContent}>
-          {/* Status badge */}
-          <View style={styles.statusRow}>
-            <IconSymbol
-              name={isCompleted ? 'checkmark.circle.fill' : 'play.circle.fill'}
-              size={16}
-              color={isCompleted ? Colors.stamp : Colors.textMuted}
-            />
-            {activity.watch && (
-              <View style={styles.watchBadge}>
-                <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
-              </View>
-            )}
-            <Text style={[styles.statusText, isCompleted && styles.statusTextCompleted]}>
-              {isCompleted ? 'Completed' : 'In Progress'}
-            </Text>
-          </View>
-
-          {/* Completed: Rating and review */}
-          {isCompleted && activity.star_rating && (
-            <View style={styles.ratingRow}>{renderStars(activity.star_rating)}</View>
-          )}
-
-          {isCompleted && activity.review_text && (
-            <Text style={styles.reviewText}>{activity.review_text}</Text>
-          )}
-
-          {/* In Progress: Progress and note */}
-          {!isCompleted && (
-            <Text style={styles.progressText}>
-              {formatProgress(activity) || 'Started watching'}
-            </Text>
-          )}
-
-          {!isCompleted && activity.note && (
-            <Text style={styles.noteText}>&quot;{activity.note}&quot;</Text>
-          )}
-
-          {/* Tagged friends */}
-          {activity.tagged_friends && activity.tagged_friends.length > 0 && (
-            <View style={styles.friendsRow}>
-              <FriendChipsDisplay userIds={activity.tagged_friends} />
-            </View>
-          )}
-
-          {/* Watch date */}
-          {activity.watch_date && (
-            <View style={styles.watchDateRow}>
-              <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
-              <Text style={styles.watchDateText}>
-                {isCompleted ? 'Watched' : 'Started'} {formatWatchDate(activity.watch_date)}
+          <View style={styles.activityContent}>
+            {/* Status badge */}
+            <View style={styles.statusRow}>
+              <IconSymbol
+                name={isCompleted ? 'checkmark.circle.fill' : 'play.circle.fill'}
+                size={16}
+                color={isCompleted ? Colors.stamp : Colors.textMuted}
+              />
+              {activity.watch && (
+                <View style={styles.watchBadge}>
+                  <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
+                </View>
+              )}
+              <Text style={[styles.statusText, isCompleted && styles.statusTextCompleted]}>
+                {isCompleted ? 'Completed' : 'In Progress'}
               </Text>
             </View>
-          )}
 
-          {/* Private indicator */}
-          {activity.is_private && (
-            <View style={styles.privateRow}>
-              <IconSymbol name="lock.fill" size={12} color={Colors.textMuted} />
-              <Text style={styles.privateText}>Private</Text>
-            </View>
+            {/* Completed: Rating and review */}
+            {isCompleted && activity.star_rating && (
+              <View style={styles.ratingRow}>{renderStars(activity.star_rating)}</View>
+            )}
+
+            {isCompleted && activity.review_text && (
+              <Text style={styles.reviewText}>{activity.review_text}</Text>
+            )}
+
+            {/* In Progress: Progress and note */}
+            {!isCompleted && (
+              <Text style={styles.progressText}>
+                {formatProgress(activity) || 'Started watching'}
+              </Text>
+            )}
+
+            {!isCompleted && activity.note && (
+              <Text style={styles.noteText}>&quot;{activity.note}&quot;</Text>
+            )}
+
+            {/* Tagged friends */}
+            {activity.tagged_friends && activity.tagged_friends.length > 0 && (
+              <View style={styles.friendsRow}>
+                <FriendChipsDisplay userIds={activity.tagged_friends} />
+              </View>
+            )}
+
+            {/* Watch date */}
+            {activity.watch_date && (
+              <View style={styles.watchDateRow}>
+                <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
+                <Text style={styles.watchDateText}>
+                  {isCompleted ? 'Watched' : 'Started'} {formatWatchDate(activity.watch_date)}
+                </Text>
+              </View>
+            )}
+
+            {/* Private indicator */}
+            {activity.is_private && (
+              <View style={styles.privateRow}>
+                <IconSymbol name="lock.fill" size={12} color={Colors.textMuted} />
+                <Text style={styles.privateText}>Private</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Delete button - only show for own history */}
+          {isOwnHistory && (
+            <Pressable
+              style={styles.deleteButton}
+              onPress={() => handleDeleteActivity(activity.id)}
+            >
+              <IconSymbol name="trash" size={16} color={Colors.error} />
+            </Pressable>
           )}
         </View>
+      );
+    },
+    [isOwnHistory]
+  );
 
-        {/* Delete button */}
-        <Pressable
-          style={styles.deleteButton}
-          onPress={() => handleDeleteActivity(activity.id)}
-        >
-          <IconSymbol name="trash" size={16} color={Colors.error} />
-        </Pressable>
-      </View>
-    );
-  };
+  // For other users, show only most recent watch unless expanded
+  const displayWatches = !isOwnHistory && !showAllWatches && watches.length > 1
+    ? [watches[0]]  // watches are already sorted by watch_number DESC
+    : watches;
+
+  const hasMoreWatches = !isOwnHistory && watches.length > 1;
 
   // Transform watches into SectionList data format
-  const sections = watches.map((watch) => ({
+  const sections = displayWatches.map((watch) => ({
     watch,
     data: watch.activities,
   }));
@@ -257,7 +286,9 @@ export default function ActivityHistoryScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Watch History</Text>
+        <Text style={styles.headerTitle}>
+          {isOwnHistory ? 'Watch History' : `${targetUser?.display_name || targetUser?.username || 'Their'}'s Watches`}
+        </Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -288,35 +319,52 @@ export default function ActivityHistoryScreen() {
 
       {/* Watches List */}
       {sections.length > 0 ? (
-        <SectionList
-          sections={sections}
-          renderItem={renderActivityCard}
-          renderSectionHeader={({ section }) => renderWatchHeader(section.watch)}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={styles.activitySeparator} />}
-          SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
-          stickySectionHeadersEnabled={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor={Colors.stamp}
-              colors={[Colors.stamp]}
-            />
-          }
-        />
+        <>
+          <SectionList
+            sections={sections}
+            renderItem={renderActivityCard}
+            renderSectionHeader={({ section }) => renderWatchHeader(section.watch)}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            ItemSeparatorComponent={() => <View style={styles.activitySeparator} />}
+            SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
+            stickySectionHeadersEnabled={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={onRefresh}
+                tintColor={Colors.stamp}
+                colors={[Colors.stamp]}
+              />
+            }
+          />
+          {hasMoreWatches && !showAllWatches && (
+            <Pressable
+              style={styles.viewAllButton}
+              onPress={() => setShowAllWatches(true)}
+            >
+              <Text style={styles.viewAllButtonText}>
+                View all {watches.length} watches
+              </Text>
+              <IconSymbol name="chevron.down" size={14} color={Colors.stamp} />
+            </Pressable>
+          )}
+        </>
       ) : (
         <View style={styles.emptyState}>
           <IconSymbol name="clock" size={48} color={Colors.textMuted} />
-          <Text style={styles.emptyText}>No watch history yet</Text>
-          <Pressable
-            style={styles.logButton}
-            onPress={() => router.push(`/log-activity/${contentId}`)}
-          >
-            <Text style={styles.logButtonText}>Log Activity</Text>
-          </Pressable>
+          <Text style={styles.emptyText}>
+            {isOwnHistory ? 'No watch history yet' : 'No watches for this title'}
+          </Text>
+          {isOwnHistory && (
+            <Pressable
+              style={styles.logButton}
+              onPress={() => router.push(`/log-activity/${contentId}`)}
+            >
+              <Text style={styles.logButtonText}>Log Activity</Text>
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -558,5 +606,23 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.xs,
     color: Colors.text,
+  },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.lg,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.stamp,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.cardBackground,
+  },
+  viewAllButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
   },
 });

@@ -37,6 +37,13 @@ export default function VerifyEmailScreen() {
   const handleResend = async () => {
     if (cooldownRemaining > 0 || resending) return;
 
+    // Validate email is present and non-empty
+    const trimmedEmail = typeof email === 'string' ? email.trim() : '';
+    if (!trimmedEmail) {
+      setError('No email address provided. Please go back and try again.');
+      return;
+    }
+
     setResending(true);
     setError(null);
     setResendSuccess(false);
@@ -44,7 +51,7 @@ export default function VerifyEmailScreen() {
     try {
       const { error: resendError } = await supabase.auth.resend({
         type: 'signup',
-        email: email || '',
+        email: trimmedEmail,
         options: {
           emailRedirectTo: 'seen://auth/confirm',
         },
