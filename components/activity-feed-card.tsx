@@ -118,6 +118,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
 
   const isCompleted = activity.status === 'completed';
   const isInProgress = activity.status === 'in_progress';
+  const isBookmarked = activity.status === 'bookmarked';
 
   const handleCardPress = () => {
     if (onPress) {
@@ -207,7 +208,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
               </Text>
               {' '}
               <Text style={styles.actionVerb}>
-                {isCompleted ? 'ranked' : 'is watching'}
+                {isCompleted ? 'ranked' : isBookmarked ? 'added to watchlist' : 'is watching'}
               </Text>
             </Text>
             <Text style={styles.timestamp}>{formatDate(activity.created_at)}</Text>
@@ -293,8 +294,8 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
         <FriendChipsDisplay userIds={activity.tagged_friends} />
       )}
 
-      {/* Watch Date */}
-      {activity.watch_date && (
+      {/* Watch Date - not shown for bookmarks */}
+      {activity.watch_date && !isBookmarked && (
         <View style={styles.watchDateRow}>
           <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
           <Text style={styles.watchDateText}>

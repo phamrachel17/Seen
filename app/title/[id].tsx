@@ -31,6 +31,8 @@ import {
   createActivity,
   deleteActivity,
   getActiveWatch,
+  createBookmarkActivity,
+  deleteBookmarkActivity,
 } from '@/lib/activity';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
@@ -301,17 +303,23 @@ export default function TitleDetailScreen() {
 
     try {
       if (isBookmarked) {
+        // Remove bookmark from bookmarks table
         await supabase
           .from('bookmarks')
           .delete()
           .eq('user_id', user.id)
           .eq('content_id', content.id);
+        // Also remove from activity_log (removes from feed)
+        await deleteBookmarkActivity(user.id, content.id);
         setIsBookmarked(false);
       } else {
+        // Add to bookmarks table
         await supabase.from('bookmarks').insert({
           user_id: user.id,
           content_id: content.id,
         });
+        // Also add to activity_log (appears in feed)
+        await createBookmarkActivity(user.id, content.id);
         setIsBookmarked(true);
       }
     } catch (error) {

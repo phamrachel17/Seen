@@ -806,3 +806,53 @@ export async function getLatestActivityForWatch(watchId: string): Promise<Activi
 
   return data ? transformActivity(data) : null;
 }
+
+// ============================================
+// BOOKMARK ACTIVITY FUNCTIONS
+// ============================================
+
+/**
+ * Create a bookmark activity (appears in feed)
+ */
+export async function createBookmarkActivity(
+  userId: string,
+  contentId: number
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('activity_log')
+    .insert({
+      user_id: userId,
+      content_id: contentId,
+      status: 'bookmarked',
+      is_private: false,
+    });
+
+  if (error) {
+    console.error('Error creating bookmark activity:', error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Delete a bookmark activity (removes from feed)
+ */
+export async function deleteBookmarkActivity(
+  userId: string,
+  contentId: number
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('activity_log')
+    .delete()
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .eq('status', 'bookmarked');
+
+  if (error) {
+    console.error('Error deleting bookmark activity:', error);
+    return false;
+  }
+
+  return true;
+}

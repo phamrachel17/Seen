@@ -132,7 +132,7 @@ export interface Content {
 }
 
 // Activity status
-export type ActivityStatus = 'completed' | 'in_progress';
+export type ActivityStatus = 'completed' | 'in_progress' | 'bookmarked';
 
 // Watch status for tracking viewing cycles
 export type WatchStatus = 'in_progress' | 'completed' | 'abandoned';
