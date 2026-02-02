@@ -438,7 +438,7 @@ export default function LogActivityModal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { invalidate } = useCache();
+  const { invalidate, invalidateKey } = useCache();
 
   // Content state
   const [content, setContent] = useState<Content | null>(null);
@@ -738,6 +738,11 @@ export default function LogActivityModal() {
       }
 
       if (activity) {
+        // Invalidate feed cache so updated activity appears immediately
+        invalidate('activity_create', user.id);
+        // Also directly invalidate the user's specific feed cache key
+        invalidateKey(`feed:${user.id}`);
+
         // Navigate to ranking flow only if not in edit-details-only mode
         if (selectedStatus === 'completed' && starRating > 0 && !skipRanking) {
           router.replace(`/rank/${content.tmdb_id}?starRating=${starRating}&contentType=${content.content_type}`);

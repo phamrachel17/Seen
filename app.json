@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "seen",
+    "name": "Seen",
     "slug": "seen",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -31,6 +31,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-notifications",
+        {
+          "color": "#802F1D"
+        }
+      ],
       [
         "expo-splash-screen",
         {

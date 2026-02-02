@@ -187,6 +187,15 @@ export interface Activity {
   user?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
 }
 
+// Friend activity summary for show page (shows both in-progress and completed)
+export interface FriendActivitySummary {
+  user_id: string;
+  user?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
+  inProgressActivity?: Activity;
+  completedActivity?: Activity;
+  totalWatchCount: number;
+}
+
 export interface Review {
   id: string;
   user_id: string;
@@ -401,4 +410,18 @@ export interface PickSuggestion {
 export interface PickForMeResult {
   suggestion: PickSuggestion;
   alternatesAvailable: boolean;
+}
+
+// ============================================
+// PUSH NOTIFICATIONS
+// ============================================
+
+export interface PushToken {
+  id: string;
+  user_id: string;
+  expo_push_token: string;
+  device_name?: string;
+  platform?: 'ios' | 'android' | 'web';
+  created_at: string;
+  updated_at: string;
 }

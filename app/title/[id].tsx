@@ -44,6 +44,7 @@ import {
   Ranking,
   Watch,
   ExternalRatings,
+  FriendActivitySummary,
 } from '@/types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -77,7 +78,7 @@ export default function TitleDetailScreen() {
   const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [totalRankingsCount, setTotalRankingsCount] = useState<number>(0);
-  const [friendsActivities, setFriendsActivities] = useState<(Activity & { totalWatchCount?: number })[]>([]);
+  const [friendsActivities, setFriendsActivities] = useState<FriendActivitySummary[]>([]);
 
   // Community rating
   const [communityRating, setCommunityRating] = useState<{
@@ -175,38 +176,58 @@ export default function TitleDetailScreen() {
       setIsInProgress(!!inProgress);
       setIsBookmarked(!!bookmark);
       setUserRanking(ranking);
-      // Count total watches per friend and deduplicate by user_id
+
+      // Track both in-progress and completed activities per friend
       // (friendsActs is already sorted by created_at DESC)
-      const watchCountPerFriend = new Map<string, number>();
-      const latestPerFriend = new Map<string, Activity>();
+      const friendActivityMap = new Map<string, {
+        inProgress?: Activity;
+        completed?: Activity;
+        user?: Activity['user'];
+        watchCount: number;
+      }>();
+      const watchKeySeen = new Set<string>();
 
       for (const activity of friendsActs) {
-        // Count watches per friend (count unique watch_ids)
-        const watchKey = `${activity.user_id}-${activity.watch_id || 'legacy'}`;
-        if (!watchCountPerFriend.has(watchKey)) {
-          watchCountPerFriend.set(watchKey, 1);
+        const visitorId = activity.user_id;
+        const existing = friendActivityMap.get(visitorId) || { watchCount: 0 };
+
+        // Track unique watches for count
+        const watchKey = `${visitorId}-${activity.watch_id || 'legacy'}`;
+        if (!watchKeySeen.has(watchKey)) {
+          watchKeySeen.add(watchKey);
+          existing.watchCount++;
         }
 
-        // Keep only the most recent activity per friend
-        if (!latestPerFriend.has(activity.user_id)) {
-          latestPerFriend.set(activity.user_id, activity);
+        // Keep user info from first activity
+        if (!existing.user) {
+          existing.user = activity.user;
         }
+
+        // Keep latest in-progress activity
+        if (activity.status === 'in_progress' && !existing.inProgress) {
+          existing.inProgress = activity;
+        }
+
+        // Keep latest completed activity (rating)
+        if (activity.status === 'completed' && !existing.completed) {
+          existing.completed = activity;
+        }
+
+        friendActivityMap.set(visitorId, existing);
       }
 
-      // Calculate total watch count per friend
-      const friendWatchCounts = new Map<string, number>();
-      for (const key of watchCountPerFriend.keys()) {
-        const friendId = key.split('-')[0];
-        friendWatchCounts.set(friendId, (friendWatchCounts.get(friendId) || 0) + 1);
-      }
+      // Convert to FriendActivitySummary array
+      const friendSummaries: FriendActivitySummary[] = Array.from(friendActivityMap.entries())
+        .filter(([, data]) => data.inProgress || data.completed)
+        .map(([visitorId, data]) => ({
+          user_id: visitorId,
+          user: data.user,
+          inProgressActivity: data.inProgress,
+          completedActivity: data.completed,
+          totalWatchCount: data.watchCount,
+        }));
 
-      // Add watchCount to each activity for display
-      const activitiesWithCounts = Array.from(latestPerFriend.values()).map(activity => ({
-        ...activity,
-        totalWatchCount: friendWatchCounts.get(activity.user_id) || 1,
-      }));
-
-      setFriendsActivities(activitiesWithCounts.slice(0, 5));
+      setFriendsActivities(friendSummaries.slice(0, 5));
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -760,79 +781,82 @@ export default function TitleDetailScreen() {
         {friendsActivities.length > 0 && (
           <View style={styles.friendsSection}>
             <Text style={styles.sectionLabel}>Friends&apos; Activity:</Text>
-            {friendsActivities.map((activity) => (
-              <View key={activity.id} style={styles.friendActivityCard}>
-                <View style={styles.friendActivityHeader}>
-                  <Pressable
-                    style={styles.friendInfo}
-                    onPress={() => router.push(`/user/${activity.user_id}`)}
-                  >
-                    <ProfileAvatar
-                      imageUrl={activity.user?.profile_image_url}
-                      username={activity.user?.username || ''}
-                      size="small"
-                      variant="circle"
-                    />
-                    <Text style={styles.friendName}>
-                      {activity.user?.display_name || activity.user?.username}
-                    </Text>
-                  </Pressable>
-                  {activity.status === 'completed' ? (
-                    <View style={styles.starsRow}>
-                      {activity.watch && (
-                        <View style={styles.watchNumberBadge}>
-                          <Text style={styles.watchNumberText}>Watch #{activity.watch.watch_number}</Text>
-                        </View>
-                      )}
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <IconSymbol
-                          key={star}
-                          name={star <= (activity.star_rating || 0) ? 'star.fill' : 'star'}
-                          size={12}
-                          color={star <= (activity.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
-                        />
-                      ))}
-                    </View>
-                  ) : (
-                    <View style={styles.inProgressBadge}>
-                      <IconSymbol name="play.circle.fill" size={12} color={Colors.textMuted} />
-                      {activity.watch && (
-                        <View style={styles.watchNumberBadge}>
-                          <Text style={styles.watchNumberText}>Watch #{activity.watch.watch_number}</Text>
-                        </View>
-                      )}
-                      <Text style={styles.inProgressBadgeText}>
-                        {formatProgress(activity) || 'In Progress'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                {activity.review_text && (
-                  <Text style={styles.friendReviewText}>{activity.review_text}</Text>
-                )}
-                {activity.note && (
-                  <Text style={styles.friendNoteText}>&quot;{activity.note}&quot;</Text>
-                )}
-                {activity.watch_date && (
-                  <View style={styles.watchDateRow}>
-                    <IconSymbol name="calendar" size={12} color={Colors.textMuted} />
-                    <Text style={styles.watchDateText}>
-                      {new Date(activity.watch_date).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </Text>
-                  </View>
-                )}
-                {/* View all watches link */}
+            {friendsActivities.map((friendSummary) => (
+              <View key={friendSummary.user_id} style={styles.friendActivityCard}>
+                {/* Header: Avatar + Name */}
                 <Pressable
-                  style={styles.viewAllWatchesLink}
-                  onPress={() => router.push(`/activity-history/${content?.id}?userId=${activity.user_id}`)}
+                  style={styles.friendInfo}
+                  onPress={() => router.push(`/user/${friendSummary.user_id}`)}
                 >
-                  <Text style={styles.viewAllWatchesText}>
-                    View watch history →
+                  <ProfileAvatar
+                    imageUrl={friendSummary.user?.profile_image_url}
+                    username={friendSummary.user?.username || ''}
+                    size="small"
+                    variant="circle"
+                  />
+                  <Text style={styles.friendName}>
+                    {friendSummary.user?.display_name || friendSummary.user?.username}
                   </Text>
                 </Pressable>
+
+                {/* In-Progress Section (if exists) */}
+                {friendSummary.inProgressActivity && (
+                  <View style={styles.friendActivitySection}>
+                    <View style={styles.activityLabelRow}>
+                      <Text style={styles.activityLabel}>In Progress:</Text>
+                      {friendSummary.inProgressActivity.watch && (
+                        <View style={styles.watchNumberBadge}>
+                          <Text style={styles.watchNumberText}>
+                            Watch #{friendSummary.inProgressActivity.watch.watch_number}
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.activityLabelDetail}>
+                        {formatProgress(friendSummary.inProgressActivity) || 'Started'}
+                      </Text>
+                    </View>
+                    {friendSummary.inProgressActivity.note && (
+                      <Text style={styles.friendNoteText}>
+                        &quot;{friendSummary.inProgressActivity.note}&quot;
+                      </Text>
+                    )}
+                    {/* View watch history link - under In Progress */}
+                    <Pressable
+                      style={styles.viewWatchHistoryLink}
+                      onPress={() => router.push(`/activity-history/${content?.id}?userId=${friendSummary.user_id}`)}
+                    >
+                      <Text style={styles.viewWatchHistoryText}>View watch history →</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Rating Section (if exists) */}
+                {friendSummary.completedActivity && (
+                  <View style={[
+                    styles.friendActivitySection,
+                    friendSummary.inProgressActivity && styles.friendRatingSectionWithDivider
+                  ]}>
+                    <View style={styles.activityLabelRow}>
+                      <Text style={styles.activityLabel}>Rating:</Text>
+                      <View style={styles.starsRow}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <IconSymbol
+                            key={star}
+                            name={star <= (friendSummary.completedActivity?.star_rating || 0) ? 'star.fill' : 'star'}
+                            size={12}
+                            color={star <= (friendSummary.completedActivity?.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                    {friendSummary.completedActivity.review_text && (
+                      <Text style={styles.friendReviewText}>
+                        <Text style={styles.friendCritiqueLabel}>Critique: </Text>
+                        {friendSummary.completedActivity.review_text}
+                      </Text>
+                    )}
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -948,6 +972,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: Spacing['3xl'],
+    minHeight: SCREEN_HEIGHT + HEADER_MIN_HEIGHT,
   },
   infoContainer: {
     backgroundColor: Colors.background,
@@ -1102,7 +1127,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     alignItems: 'center',
     backgroundColor: Colors.stamp,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.md,
   },
   logActivityButtonText: {
     fontFamily: Fonts.sansSemiBold,
@@ -1114,6 +1139,7 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   yourTakeSection: {
+    marginTop: Spacing.lg,
     marginBottom: Spacing.xl,
   },
   yourProgressSection: {
@@ -1133,7 +1159,7 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontFamily: Fonts.serifExtraBold,
-    fontSize: FontSizes.lg,
+    fontSize: FontSizes.xl,
     color: Colors.text,
   },
   sectionLabelRow: {
@@ -1271,7 +1297,8 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
   friendsSection: {
-    marginTop: Spacing.lg,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.lg,
     paddingHorizontal: Spacing.xl,
   },
   friendActivityCard: {
@@ -1306,11 +1333,17 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
   },
+  friendCritiqueLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
   friendReviewText: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
+    fontSize: FontSizes.md,
     color: Colors.textSecondary,
-    lineHeight: FontSizes.sm * 1.5,
+    lineHeight: FontSizes.md * 1.5,
+    marginTop: Spacing.sm,
   },
   friendNoteText: {
     fontFamily: Fonts.sans,
@@ -1318,15 +1351,36 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: 'italic',
   },
-  viewAllWatchesLink: {
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.borderLight,
+  friendActivitySection: {
+    paddingVertical: Spacing.xs,
   },
-  viewAllWatchesText: {
+  friendRatingSectionWithDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderLight,
+    marginTop: Spacing.xs,
+    paddingTop: Spacing.sm,
+  },
+  activityLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  activityLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
+  activityLabelDetail: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
+  },
+  viewWatchHistoryLink: {
+    marginTop: Spacing.xs,
+  },
+  viewWatchHistoryText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
     color: Colors.stamp,
   },
 });

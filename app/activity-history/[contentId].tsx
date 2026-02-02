@@ -201,14 +201,7 @@ export default function ActivityHistoryScreen() {
               </Text>
             </View>
 
-            {/* Completed: Rating and review */}
-            {isCompleted && activity.star_rating && (
-              <View style={styles.ratingRow}>{renderStars(activity.star_rating)}</View>
-            )}
-
-            {isCompleted && activity.review_text && (
-              <Text style={styles.reviewText}>{activity.review_text}</Text>
-            )}
+            {/* Rating details are now shown on the show page, not here */}
 
             {/* In Progress: Progress and note */}
             {!isCompleted && (
@@ -270,6 +263,7 @@ export default function ActivityHistoryScreen() {
   const hasMoreWatches = !isOwnHistory && watches.length > 1;
 
   // Transform watches into SectionList data format
+  // Show all watches - rating details are hidden in the card rendering
   const sections = displayWatches.map((watch) => ({
     watch,
     data: watch.activities,

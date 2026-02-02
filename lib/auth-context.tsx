@@ -1,8 +1,13 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { normalizeEmail, isEmail, getEmailByUsername } from './validation';
 import { cache } from './cache';
+import {
+  registerForPushNotifications,
+  savePushToken,
+  removePushToken,
+} from './push-notifications';
 
 interface AuthContextType {
   session: Session | null;
@@ -20,6 +25,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentPushToken = useRef<string | null>(null);
+
+  // Setup push notifications for a user
+  const setupPushNotifications = async (userId: string) => {
+    try {
+      const token = await registerForPushNotifications();
+      if (token) {
+        await savePushToken(userId, token);
+        currentPushToken.current = token;
+      }
+    } catch (error) {
+      console.error('Error setting up push notifications:', error);
+    }
+  };
 
   useEffect(() => {
     // Get initial session
@@ -37,9 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+
+      // Setup push notifications when user signs in
+      if (event === 'SIGNED_IN' && session?.user) {
+        setupPushNotifications(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -96,6 +120,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Remove push token before signing out
+    if (currentPushToken.current) {
+      await removePushToken(currentPushToken.current);
+      currentPushToken.current = null;
+    }
     cache.clear(); // Clear all cached data on logout
     await supabase.auth.signOut();
   };

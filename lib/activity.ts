@@ -750,6 +750,42 @@ export async function getWatchById(watchId: string): Promise<Watch | null> {
   return transformWatch(data);
 }
 
+// Get user's activity feed (for user activity screen)
+export async function getUserActivitiesFeed(
+  userId: string,
+  viewerId: string | undefined,
+  limit: number = 50,
+  offset: number = 0
+): Promise<Activity[]> {
+  const isOwnProfile = userId === viewerId;
+
+  let query = supabase
+    .from('activity_log')
+    .select(`
+      *,
+      content:content_id (*),
+      user:user_id (id, username, display_name, profile_image_url),
+      watch:watch_id (*)
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  // Hide private activities when viewing someone else's profile
+  if (!isOwnProfile) {
+    query = query.eq('is_private', false);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching user activities feed:', error);
+    return [];
+  }
+
+  return data?.map(transformActivity) || [];
+}
+
 // Get latest activity for a watch
 export async function getLatestActivityForWatch(watchId: string): Promise<Activity | null> {
   const { data, error } = await supabase

@@ -308,7 +308,7 @@ export default function ProfileScreen() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
             {recentActivities.length > 0 && (
-              <Pressable onPress={() => router.push('/(tabs)')}>
+              <Pressable onPress={() => router.push(`/user-activity/${user?.id}`)}>
                 <Text style={styles.viewAll}>VIEW ALL</Text>
               </Pressable>
             )}
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: 'row',
     marginHorizontal: Spacing.xl,
-    marginTop: Spacing.xl,
+    marginTop: Spacing.lg,
     paddingVertical: Spacing.lg,
     borderTopWidth: 1,
     borderBottomWidth: 1,
@@ -518,17 +518,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   listsSection: {
-    marginTop: Spacing.xl,
+    marginTop: Spacing['2xl'],
     paddingHorizontal: Spacing.xl,
   },
   section: {
-    marginTop: Spacing.xl,
+    marginTop: Spacing['2xl'],
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
     paddingHorizontal: Spacing.xl,
   },
   sectionLabel: {

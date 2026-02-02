@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -98,6 +98,10 @@ export default function FeedScreen() {
     [refreshKey]
   );
 
+  const keyExtractor = useCallback((item: Activity) => item.id, []);
+
+  const ItemSeparator = useMemo(() => () => <View style={styles.separator} />, []);
+
   const renderEmpty = () => {
     if (isLoading) return null;
 
@@ -138,7 +142,8 @@ export default function FeedScreen() {
             )}
           </Pressable>
           <Text style={styles.welcomeText}>
-            Welcome back{displayName ? `, ${displayName}` : ''}
+            Welcome back{displayName ? ', ' : ''}
+            {displayName && <Text style={styles.welcomeNameBold}>{displayName}</Text>}
           </Text>
         </View>
       </View>
@@ -148,7 +153,7 @@ export default function FeedScreen() {
       ) : (
         <FlatList
           data={activities}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={styles.listContent}
@@ -161,7 +166,12 @@ export default function FeedScreen() {
               colors={[Colors.stamp]}
             />
           }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={ItemSeparator}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          getItemLayout={undefined}
         />
       )}
     </View>
@@ -193,6 +203,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.text,
     marginTop: Spacing.xs,
+  },
+  welcomeNameBold: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
   },
   feedLabel: {
     fontFamily: Fonts.sans,

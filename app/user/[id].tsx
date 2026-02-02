@@ -389,6 +389,11 @@ export default function UserProfileScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
+            {recentActivities.length > 0 && (
+              <Pressable onPress={() => router.push(`/user-activity/${userId}`)}>
+                <Text style={styles.viewAll}>VIEW ALL</Text>
+              </Pressable>
+            )}
           </View>
 
           {recentActivities.length > 0 ? (
@@ -651,6 +656,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
+  },
+  viewAll: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.xs,
+    color: Colors.navy,
   },
   recentScroll: {
     paddingHorizontal: Spacing.xl,

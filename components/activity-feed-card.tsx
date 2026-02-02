@@ -39,6 +39,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
   const [isLikeLoading, setIsLikeLoading] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [showHeart, setShowHeart] = useState(false);
+  const [isCritiqueExpanded, setIsCritiqueExpanded] = useState(false);
 
   useEffect(() => {
     loadInteractions();
@@ -262,9 +263,22 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
 
           {/* Review text or note */}
           {isCompleted && activity.review_text && (
-            <Text style={styles.reviewText} numberOfLines={3}>
-              {activity.review_text}
-            </Text>
+            <View>
+              <Text
+                style={styles.reviewText}
+                numberOfLines={isCritiqueExpanded ? undefined : 8}
+              >
+                <Text style={styles.critiqueLabel}>Critique: </Text>
+                {activity.review_text}
+              </Text>
+              {activity.review_text.length > 300 && (
+                <Pressable onPress={() => setIsCritiqueExpanded(!isCritiqueExpanded)}>
+                  <Text style={styles.readMoreText}>
+                    {isCritiqueExpanded ? 'Show less' : 'Read more'}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
           )}
           {isInProgress && activity.note && (
             <Text style={styles.noteText} numberOfLines={2}>
@@ -417,7 +431,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   contentTitle: {
-    fontFamily: Fonts.serifSemiBold,
+    fontFamily: Fonts.serifExtraBold,
     fontSize: FontSizes.lg,
     color: Colors.text,
     marginBottom: Spacing.xs,
@@ -439,18 +453,29 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.sm,
+    fontSize: FontSizes.md,
     color: Colors.textMuted,
+  },
+  critiqueLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
   },
   reviewText: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
+    fontSize: FontSizes.md,
     color: Colors.textSecondary,
-    lineHeight: FontSizes.sm * 1.5,
+    lineHeight: FontSizes.md * 1.5,
+  },
+  readMoreText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
+    marginTop: Spacing.xs,
   },
   noteText: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
+    fontSize: FontSizes.md,
     color: Colors.textMuted,
     fontStyle: 'italic',
   },
@@ -497,14 +522,14 @@ const styles = StyleSheet.create({
   },
   watchBadge: {
     backgroundColor: Colors.dust,
-    paddingHorizontal: Spacing.xs,
-    paddingVertical: 1,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
     borderRadius: BorderRadius.sm,
     marginRight: Spacing.xs,
   },
   watchBadgeText: {
     fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.xs,
+    fontSize: FontSizes.sm,
     color: Colors.text,
   },
 });

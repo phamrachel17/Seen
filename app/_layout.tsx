@@ -22,6 +22,7 @@ import {
 } from '@expo-google-fonts/nanum-myeongjo';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
 import * as Sentry from '@sentry/react-native';
 import { PostHogProvider } from 'posthog-react-native';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
@@ -98,6 +99,56 @@ function RootLayoutNav() {
 
     return () => subscription.remove();
   }, [router]);
+
+  // Handle push notification taps
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        const data = response.notification.request.content.data;
+
+        // Navigate based on notification type
+        if (data?.type && data?.targetId) {
+          handleNotificationNavigation(
+            data.type as string,
+            data.targetId as string,
+            data.contentType as string | undefined
+          );
+        } else {
+          // Default: navigate to notifications screen
+          router.push('/notifications');
+        }
+      }
+    );
+
+    return () => subscription.remove();
+  }, [router]);
+
+  // Navigation helper for notification taps
+  const handleNotificationNavigation = (
+    type: string,
+    targetId: string,
+    contentType?: string
+  ) => {
+    switch (type) {
+      case 'like':
+      case 'comment':
+      case 'tagged':
+        // Navigate to title detail page
+        if (targetId && contentType) {
+          router.push(`/title/${targetId}?type=${contentType}` as any);
+        }
+        break;
+      case 'follow':
+        // Navigate to user profile
+        if (targetId) {
+          router.push(`/user/${targetId}`);
+        }
+        break;
+      default:
+        // Navigate to notifications screen
+        router.push('/notifications');
+    }
+  };
 
   if (loading) {
     return <LoadingScreen />;
@@ -203,6 +254,13 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="user-activity/[userId]"
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
           }}
         />
       </Stack>
