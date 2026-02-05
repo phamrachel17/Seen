@@ -17,6 +17,7 @@ export interface UserProfile {
 
 export interface UserStats {
   totalFilms: number;
+  totalShows: number;
   totalMinutes: number;
   rankingsCount: number;
 }
@@ -47,6 +48,7 @@ export function useUserData(userId: string | undefined): UseUserDataResult {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats>({
     totalFilms: 0,
+    totalShows: 0,
     totalMinutes: 0,
     rankingsCount: 0,
   });

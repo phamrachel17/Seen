@@ -404,7 +404,7 @@ export default function RankingModal() {
                     {/* Star Rating */}
                     <View style={styles.popupSection}>
                       <StarRating
-                        rating={(detailPopup.movie as RankedMovie).star_rating}
+                        rating={(detailPopup.movie as RankedMovie).star_rating || 0}
                         size={20}
                       />
                     </View>

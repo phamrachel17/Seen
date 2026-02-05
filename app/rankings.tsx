@@ -123,7 +123,7 @@ export default function RankingsScreen() {
               created_at: item.created_at,
               updated_at: item.updated_at,
             },
-            star_rating: ratingsMap.get(tmdbToContentMap.get(Number(item.movie_id)) ?? -1) || 0,
+            star_rating: ratingsMap.get(tmdbToContentMap.get(Number(item.movie_id)) ?? -1) ?? null,
           }));
       }
 

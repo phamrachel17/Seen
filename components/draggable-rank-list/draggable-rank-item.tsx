@@ -20,7 +20,7 @@ const DELETE_BUTTON_WIDTH = 80;
 
 export interface RankedMovie extends Movie {
   ranking: Ranking;
-  star_rating: number;
+  star_rating: number | null;  // null indicates missing data (not 0 stars)
 }
 
 interface DraggableRankItemProps {

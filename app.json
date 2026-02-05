@@ -2,7 +2,7 @@
   "expo": {
     "name": "Seen",
     "slug": "seen",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/manAndTv.jpg",
     "scheme": "seen",
@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.seen.ios",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Seen uses your photo library to let you choose a profile picture. Your selected photo will be visible to other users on your profile."
       }
     },
     "android": {

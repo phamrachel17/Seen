@@ -33,6 +33,7 @@ import { User, Activity } from '@/types';
 
 interface UserStats {
   totalFilms: number;
+  totalShows: number;
   totalMinutes: number;
   rankingsCount: number;
 }
@@ -55,6 +56,7 @@ export default function UserProfileScreen() {
   > | null>(null);
   const [stats, setStats] = useState<UserStats>({
     totalFilms: 0,
+    totalShows: 0,
     totalMinutes: 0,
     rankingsCount: 0,
   });
@@ -345,6 +347,11 @@ export default function UserProfileScreen() {
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>{stats.totalFilms}</Text>
             <Text style={styles.statLabel}>FILMS</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statBox}>
+            <Text style={styles.statNumber}>{stats.totalShows}</Text>
+            <Text style={styles.statLabel}>SHOWS</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>

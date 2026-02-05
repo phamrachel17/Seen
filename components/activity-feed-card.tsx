@@ -20,6 +20,7 @@ interface ActivityFeedCardProps {
   onPress?: () => void;
   onLikeChange?: () => void;
   refreshKey?: number;
+  hidePoster?: boolean;
 }
 
 export const ActivityFeedCard = React.memo(function ActivityFeedCard({
@@ -27,6 +28,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
   onPress,
   onLikeChange,
   refreshKey,
+  hidePoster = false,
 }: ActivityFeedCardProps) {
   const router = useRouter();
   const { user: currentUser } = useAuth();
@@ -218,19 +220,21 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
 
       {/* Content Row */}
       <View style={styles.contentRow}>
-        {content.poster_url ? (
-          <Image
-            source={{ uri: content.poster_url }}
-            style={styles.poster}
-            contentFit="cover"
-          />
-        ) : (
-          <View style={[styles.poster, styles.posterPlaceholder]}>
-            <Text style={styles.posterPlaceholderText}>{content.title[0]}</Text>
-          </View>
+        {!hidePoster && (
+          content.poster_url ? (
+            <Image
+              source={{ uri: content.poster_url }}
+              style={styles.poster}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.poster, styles.posterPlaceholder]}>
+              <Text style={styles.posterPlaceholderText}>{content.title[0]}</Text>
+            </View>
+          )
         )}
 
-        <View style={styles.contentDetails}>
+        <View style={[styles.contentDetails, hidePoster && styles.contentDetailsNoPoster]}>
           <Text style={styles.contentTitle} numberOfLines={2}>
             {content.title}
           </Text>
@@ -430,6 +434,9 @@ const styles = StyleSheet.create({
   contentDetails: {
     flex: 1,
     justifyContent: 'flex-start',
+  },
+  contentDetailsNoPoster: {
+    flex: 1,
   },
   contentTitle: {
     fontFamily: Fonts.serifExtraBold,

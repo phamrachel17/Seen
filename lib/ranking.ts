@@ -143,6 +143,41 @@ function calculateNeighborAwareScore(
   return Number(score.toFixed(1));
 }
 
+/**
+ * Ensure all rankings have monotonically decreasing scores.
+ * Fixes any inversions by adjusting scores to be 0.1 below the item above.
+ * This prevents the bug where items pushed down by insertions retain old scores.
+ */
+async function ensureScoreMonotonicity(
+  userId: string,
+  contentType: ContentType
+): Promise<void> {
+  const rankings = await getUserRankingsWithRatings(userId, contentType);
+  const sorted = [...rankings].sort((a, b) => a.ranking.rank_position - b.ranking.rank_position);
+
+  const updates: { id: string; display_score: number }[] = [];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i];
+    const above = sorted[i - 1];
+
+    if (current.ranking.display_score >= above.ranking.display_score) {
+      // Inversion detected - fix it
+      const fixedScore = Math.max(above.ranking.display_score - 0.1, 1.0);
+      // Update the local copy so subsequent comparisons use the fixed value
+      current.ranking.display_score = Number(fixedScore.toFixed(1));
+      updates.push({ id: current.ranking.id, display_score: current.ranking.display_score });
+    }
+  }
+
+  // Batch update all fixes
+  for (const update of updates) {
+    await supabase.from('rankings')
+      .update({ display_score: update.display_score })
+      .eq('id', update.id);
+  }
+}
+
 // Scoring weights for comparison selection (similarity-based)
 const SCORE_WEIGHTS = {
   GENRE_MATCH: 3,
@@ -612,6 +647,9 @@ export async function saveRanking(
       throw insertError;
     }
 
+    // Fix any score inversions caused by shifting existing rankings
+    await ensureScoreMonotonicity(userId, contentType);
+
     // Ensure content exists and create completed activity
     try {
       // Ensure content exists in content table and get content ID
@@ -808,6 +846,9 @@ export async function reorderRankings(
       console.error('Error updating star rating:', starUpdateError);
     }
   }
+
+  // Fix any score inversions after reordering
+  await ensureScoreMonotonicity(userId, contentType);
 }
 
 /**

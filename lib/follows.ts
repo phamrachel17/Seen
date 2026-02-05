@@ -310,15 +310,16 @@ export async function getUserRankingPosition(userId: string): Promise<number | n
   return result;
 }
 
-// Get user stats (films, watch time, rankings count) - cached for 30 minutes
+// Get user stats (films, shows, watch time, rankings count) - cached for 30 minutes
 export async function getUserStats(userId: string): Promise<{
   totalFilms: number;
+  totalShows: number;
   totalMinutes: number;
   rankingsCount: number;
 }> {
   // Check cache first
   const cacheKey = CACHE_KEYS.userStats(userId);
-  const cached = cache.get<{ totalFilms: number; totalMinutes: number; rankingsCount: number }>(cacheKey);
+  const cached = cache.get<{ totalFilms: number; totalShows: number; totalMinutes: number; rankingsCount: number }>(cacheKey);
   if (cached) return cached;
 
   const [activitiesResult, rankingsResult] = await Promise.all([
@@ -355,8 +356,12 @@ export async function getUserStats(userId: string): Promise<{
     }
   }
 
-  // Calculate total watch time from unique titles
-  const totalMinutes = Array.from(uniqueContentMap.values()).reduce((acc, activity) => {
+  // Count films and shows separately, and calculate watch time
+  let totalFilms = 0;
+  let totalShows = 0;
+  let totalMinutes = 0;
+
+  for (const activity of uniqueContentMap.values()) {
     const content = activity.content as {
       content_type: string;
       runtime_minutes?: number;
@@ -364,29 +369,26 @@ export async function getUserStats(userId: string): Promise<{
       episode_runtime?: number;
     } | null;
 
-    if (!content) return acc;
+    if (!content) continue;
 
-    // For movies: use runtime_minutes
+    // Count by content type
     if (content.content_type === 'movie') {
-      return acc + (content.runtime_minutes || 0);
-    }
-
-    // For TV shows: use runtime_minutes if available, otherwise calculate
-    if (content.content_type === 'tv') {
+      totalFilms++;
+      totalMinutes += content.runtime_minutes || 0;
+    } else if (content.content_type === 'tv') {
+      totalShows++;
+      // For TV shows: use runtime_minutes if available, otherwise calculate
       if (content.runtime_minutes) {
-        return acc + content.runtime_minutes;
-      }
-      // Calculate from episodes if runtime not available
-      if (content.total_episodes && content.episode_runtime) {
-        return acc + content.total_episodes * content.episode_runtime;
+        totalMinutes += content.runtime_minutes;
+      } else if (content.total_episodes && content.episode_runtime) {
+        totalMinutes += content.total_episodes * content.episode_runtime;
       }
     }
-
-    return acc;
-  }, 0);
+  }
 
   const result = {
-    totalFilms: uniqueContentMap.size,
+    totalFilms,
+    totalShows,
     totalMinutes,
     rankingsCount: rankingsResult.count || 0,
   };
@@ -402,16 +404,23 @@ interface ReviewWithMovie extends Review {
   movies: Movie;
 }
 
-// Get top users ranked by total movies ranked (descending)
+// Get top users ranked by total rankings (movies + TV shows) in descending order
 export async function getTopRankedUsers(
   currentUserId: string,
-  limit: number = 20
+  limit: number = 50,
+  includeCurrentUser: boolean = false
 ): Promise<(UserSearchResult & { rankings_count: number })[]> {
   // Get all users with their rankings count
-  const { data: users, error } = await supabase
+  let query = supabase
     .from('users')
-    .select('id, username, display_name, profile_image_url')
-    .neq('id', currentUserId);
+    .select('id, username, display_name, profile_image_url');
+
+  // Optionally exclude current user
+  if (!includeCurrentUser) {
+    query = query.neq('id', currentUserId);
+  }
+
+  const { data: users, error } = await query;
 
   if (error || !users || users.length === 0) return [];
 
@@ -438,14 +447,21 @@ export async function getTopRankedUsers(
     .sort((a, b) => b.rankings_count - a.rankings_count)
     .slice(0, limit);
 
-  // Get follow status for all returned users
-  const { data: follows } = await supabase
-    .from('follows')
-    .select('following_id')
-    .eq('follower_id', currentUserId)
-    .in('following_id', sortedUsers.map((u) => u.id));
+  // Get follow status for all returned users (excluding current user from follow check)
+  const otherUserIds = sortedUsers
+    .filter((u) => u.id !== currentUserId)
+    .map((u) => u.id);
 
-  const followingSet = new Set(follows?.map((f) => f.following_id) || []);
+  const followingSet = new Set<string>();
+  if (otherUserIds.length > 0) {
+    const { data: follows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId)
+      .in('following_id', otherUserIds);
+
+    follows?.forEach((f) => followingSet.add(f.following_id));
+  }
 
   return sortedUsers.map((user) => ({
     ...user,

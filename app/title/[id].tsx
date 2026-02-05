@@ -18,7 +18,6 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
-import { ProfileAvatar } from '@/components/profile-avatar';
 import { AddToListModal } from '@/components/add-to-list-modal';
 import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
 import { getExternalRatings } from '@/lib/omdb';
@@ -46,8 +45,8 @@ import {
   Ranking,
   Watch,
   ExternalRatings,
-  FriendActivitySummary,
 } from '@/types';
+import { ActivityFeedCard } from '@/components/activity-feed-card';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HEADER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.35);
@@ -80,7 +79,7 @@ export default function TitleDetailScreen() {
   const [activeWatch, setActiveWatch] = useState<Watch | null>(null);
   const [userRanking, setUserRanking] = useState<Ranking | null>(null);
   const [totalRankingsCount, setTotalRankingsCount] = useState<number>(0);
-  const [friendsActivities, setFriendsActivities] = useState<FriendActivitySummary[]>([]);
+  const [friendsActivities, setFriendsActivities] = useState<Activity[]>([]);
 
   // Community rating
   const [communityRating, setCommunityRating] = useState<{
@@ -161,6 +160,7 @@ export default function TitleDetailScreen() {
     try {
       // Load user's activities, bookmark, ranking, watch, and friends' activities in parallel
       const followingIds = await getFollowingIds(user.id);
+      const idsForActivity = [...followingIds, user.id]; // Include self to show own activity in feed
 
       const contentType = type || 'movie';
       const [completed, inProgress, watch, bookmark, ranking, friendsActs] = await Promise.all([
@@ -169,7 +169,7 @@ export default function TitleDetailScreen() {
         getActiveWatch(user.id, contentId),
         checkBookmarkStatus(contentId),
         loadUserRanking(tmdbId, contentType),
-        getFriendsActivitiesForContent(user.id, contentId, followingIds),
+        getFriendsActivitiesForContent(user.id, contentId, idsForActivity),
       ]);
 
       setCompletedActivity(completed);
@@ -179,57 +179,24 @@ export default function TitleDetailScreen() {
       setIsBookmarked(!!bookmark);
       setUserRanking(ranking);
 
-      // Track both in-progress and completed activities per friend
-      // (friendsActs is already sorted by created_at DESC)
-      const friendActivityMap = new Map<string, {
-        inProgress?: Activity;
-        completed?: Activity;
-        user?: Activity['user'];
-        watchCount: number;
-      }>();
-      const watchKeySeen = new Set<string>();
+      // Collect unique activities per friend (one in-progress + one completed per user)
+      // This ensures we show both types of activity but not duplicates
+      const seenUserStatus = new Set<string>();
+      const uniqueActivities: Activity[] = [];
 
       for (const activity of friendsActs) {
-        const visitorId = activity.user_id;
-        const existing = friendActivityMap.get(visitorId) || { watchCount: 0 };
-
-        // Track unique watches for count
-        const watchKey = `${visitorId}-${activity.watch_id || 'legacy'}`;
-        if (!watchKeySeen.has(watchKey)) {
-          watchKeySeen.add(watchKey);
-          existing.watchCount++;
+        const key = `${activity.user_id}-${activity.status}`;
+        if (!seenUserStatus.has(key)) {
+          seenUserStatus.add(key);
+          uniqueActivities.push(activity);
         }
-
-        // Keep user info from first activity
-        if (!existing.user) {
-          existing.user = activity.user;
-        }
-
-        // Keep latest in-progress activity
-        if (activity.status === 'in_progress' && !existing.inProgress) {
-          existing.inProgress = activity;
-        }
-
-        // Keep latest completed activity (rating)
-        if (activity.status === 'completed' && !existing.completed) {
-          existing.completed = activity;
-        }
-
-        friendActivityMap.set(visitorId, existing);
       }
 
-      // Convert to FriendActivitySummary array
-      const friendSummaries: FriendActivitySummary[] = Array.from(friendActivityMap.entries())
-        .filter(([, data]) => data.inProgress || data.completed)
-        .map(([visitorId, data]) => ({
-          user_id: visitorId,
-          user: data.user,
-          inProgressActivity: data.inProgress,
-          completedActivity: data.completed,
-          totalWatchCount: data.watchCount,
-        }));
-
-      setFriendsActivities(friendSummaries.slice(0, 5));
+      // Sort by created_at descending and limit to 5
+      uniqueActivities.sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      setFriendsActivities(uniqueActivities.slice(0, 5));
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -789,84 +756,15 @@ export default function TitleDetailScreen() {
         {friendsActivities.length > 0 && (
           <View style={styles.friendsSection}>
             <Text style={styles.sectionLabel}>Friends&apos; Activity:</Text>
-            {friendsActivities.map((friendSummary) => (
-              <View key={friendSummary.user_id} style={styles.friendActivityCard}>
-                {/* Header: Avatar + Name */}
-                <Pressable
-                  style={styles.friendInfo}
-                  onPress={() => router.push(`/user/${friendSummary.user_id}`)}
-                >
-                  <ProfileAvatar
-                    imageUrl={friendSummary.user?.profile_image_url}
-                    username={friendSummary.user?.username || ''}
-                    size="small"
-                    variant="circle"
-                  />
-                  <Text style={styles.friendName}>
-                    {friendSummary.user?.display_name || friendSummary.user?.username}
-                  </Text>
-                </Pressable>
-
-                {/* In-Progress Section (if exists) */}
-                {friendSummary.inProgressActivity && (
-                  <View style={styles.friendActivitySection}>
-                    <View style={styles.activityLabelRow}>
-                      <Text style={styles.activityLabel}>In Progress:</Text>
-                      {friendSummary.inProgressActivity.watch && (
-                        <View style={styles.watchNumberBadge}>
-                          <Text style={styles.watchNumberText}>
-                            Watch #{friendSummary.inProgressActivity.watch.watch_number}
-                          </Text>
-                        </View>
-                      )}
-                      <Text style={styles.activityLabelDetail}>
-                        {formatProgress(friendSummary.inProgressActivity) || 'Started'}
-                      </Text>
-                    </View>
-                    {friendSummary.inProgressActivity.note && (
-                      <Text style={styles.friendNoteText}>
-                        &quot;{friendSummary.inProgressActivity.note}&quot;
-                      </Text>
-                    )}
-                    {/* View watch history link - under In Progress */}
-                    <Pressable
-                      style={styles.viewWatchHistoryLink}
-                      onPress={() => router.push(`/activity-history/${content?.id}?userId=${friendSummary.user_id}`)}
-                    >
-                      <Text style={styles.viewWatchHistoryText}>View watch history →</Text>
-                    </Pressable>
-                  </View>
-                )}
-
-                {/* Rating Section (if exists) */}
-                {friendSummary.completedActivity && (
-                  <View style={[
-                    styles.friendActivitySection,
-                    friendSummary.inProgressActivity && styles.friendRatingSectionWithDivider
-                  ]}>
-                    <View style={styles.activityLabelRow}>
-                      <Text style={styles.activityLabel}>Rating:</Text>
-                      <View style={styles.starsRow}>
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <IconSymbol
-                            key={star}
-                            name={star <= (friendSummary.completedActivity?.star_rating || 0) ? 'star.fill' : 'star'}
-                            size={12}
-                            color={star <= (friendSummary.completedActivity?.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                    {friendSummary.completedActivity.review_text && (
-                      <Text style={styles.friendReviewText}>
-                        <Text style={styles.friendCritiqueLabel}>Critique: </Text>
-                        {friendSummary.completedActivity.review_text}
-                      </Text>
-                    )}
-                  </View>
-                )}
-              </View>
-            ))}
+            <View style={styles.friendsActivityList}>
+              {friendsActivities.map((activity) => (
+                <ActivityFeedCard
+                  key={activity.id}
+                  activity={activity}
+                  hidePoster={true}
+                />
+              ))}
+            </View>
           </View>
         )}
 
@@ -1309,86 +1207,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     paddingHorizontal: Spacing.xl,
   },
-  friendActivityCard: {
-    backgroundColor: Colors.cardBackground,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
+  friendsActivityList: {
+    gap: Spacing.md,
     marginTop: Spacing.md,
-  },
-  friendActivityHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  friendInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  friendName: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-  },
-  inProgressBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  inProgressBadgeText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.xs,
-    color: Colors.textMuted,
-  },
-  friendCritiqueLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-  },
-  friendReviewText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textSecondary,
-    lineHeight: FontSizes.md * 1.5,
-    marginTop: Spacing.sm,
-  },
-  friendNoteText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-  },
-  friendActivitySection: {
-    paddingVertical: Spacing.xs,
-  },
-  friendRatingSectionWithDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.borderLight,
-    marginTop: Spacing.xs,
-    paddingTop: Spacing.sm,
-  },
-  activityLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  activityLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-  },
-  activityLabelDetail: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textSecondary,
-  },
-  viewWatchHistoryLink: {
-    marginTop: Spacing.xs,
-  },
-  viewWatchHistoryText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.stamp,
   },
 });

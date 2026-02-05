@@ -160,7 +160,8 @@ function RootLayoutNav() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: Colors.background },
-          animation: 'fade',
+          animation: 'slide_from_right',
+          animationDuration: 200,
         }}
       >
         <Stack.Screen name="(auth)" />
@@ -177,6 +178,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
@@ -184,6 +186,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
@@ -191,6 +194,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
@@ -198,6 +202,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
@@ -212,6 +217,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
@@ -254,6 +260,7 @@ function RootLayoutNav() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+            animationDuration: 250,
           }}
         />
         <Stack.Screen
