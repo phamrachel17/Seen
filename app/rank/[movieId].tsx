@@ -28,7 +28,7 @@ import {
 } from '@/lib/ranking';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
-import { getUserCompletedActivity } from '@/lib/activity';
+import { getUserCompletedActivity, deleteActivity } from '@/lib/activity';
 import { supabase } from '@/lib/supabase';
 import { Movie, ContentType, Activity } from '@/types';
 
@@ -59,11 +59,12 @@ function StarRating({ rating, size = 12 }: { rating: number; size?: number }) {
 }
 
 export default function RankingModal() {
-  const { movieId, starRating: starRatingParam, contentType: contentTypeParam, replaceExisting } = useLocalSearchParams<{
+  const { movieId, starRating: starRatingParam, contentType: contentTypeParam, replaceExisting, activityId } = useLocalSearchParams<{
     movieId: string;
     starRating?: string;
     contentType?: ContentType;
     replaceExisting?: string;
+    activityId?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -165,6 +166,21 @@ export default function RankingModal() {
     }
   };
 
+  // Handle early exit - delete activity if user cancels ranking flow
+  const handleEarlyExit = async () => {
+    // Only delete if we have an activityId (came from log-activity flow)
+    if (activityId) {
+      try {
+        await deleteActivity(activityId);
+        // Invalidate caches since activity was deleted
+        invalidate('activity_create', user!.id);
+      } catch (error) {
+        console.error('Error deleting activity on early exit:', error);
+      }
+    }
+    router.back();
+  };
+
   // Helper for score badge color
   const getScoreColor = (score: number) => {
     if (score >= 8.0) return Colors.stamp;
@@ -261,7 +277,7 @@ export default function RankingModal() {
     return (
       <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
         <Text style={styles.errorText}>Something went wrong</Text>
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={handleEarlyExit}>
           <Text style={styles.backLink}>Go back</Text>
         </Pressable>
       </View>
@@ -272,7 +288,7 @@ export default function RankingModal() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.closeButton}>
+        <Pressable onPress={handleEarlyExit} style={styles.closeButton}>
           <IconSymbol name="xmark" size={24} color={Colors.text} />
         </Pressable>
         <View style={styles.progressContainer}>

@@ -745,7 +745,7 @@ export default function LogActivityModal() {
 
         // Navigate to ranking flow only if not in edit-details-only mode
         if (selectedStatus === 'completed' && starRating > 0 && !skipRanking) {
-          router.replace(`/rank/${content.tmdb_id}?starRating=${starRating}&contentType=${content.content_type}`);
+          router.replace(`/rank/${content.tmdb_id}?starRating=${starRating}&contentType=${content.content_type}&activityId=${activity.id}`);
         } else {
           router.back();
         }

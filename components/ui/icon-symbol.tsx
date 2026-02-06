@@ -40,6 +40,7 @@ const MAPPING = {
   'eye.slash': 'visibility-off',
   'chevron.left': 'chevron-left',
   'gearshape': 'settings',
+  'arrow.down.app': 'system-update',
 } as IconMapping;
 
 /**

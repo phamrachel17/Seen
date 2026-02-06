@@ -27,6 +27,8 @@ import * as Sentry from '@sentry/react-native';
 import { PostHogProvider } from 'posthog-react-native';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
+import { useAppUpdate } from '@/lib/hooks/useAppUpdate';
+import { UpdatePromptModal } from '@/components/update-prompt-modal';
 import { Colors } from '@/constants/theme';
 import 'react-native-reanimated';
 
@@ -46,6 +48,16 @@ function RootLayoutNav() {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // Check for app updates
+  const {
+    showUpdatePrompt,
+    isForceUpdate,
+    latestVersion,
+    storeUrl,
+    updateMessage,
+    dismissUpdate,
+  } = useAppUpdate();
 
   useEffect(() => {
     if (loading) return;
@@ -272,6 +284,15 @@ function RootLayoutNav() {
         />
       </Stack>
       <StatusBar style="dark" />
+
+      <UpdatePromptModal
+        visible={showUpdatePrompt}
+        latestVersion={latestVersion}
+        storeUrl={storeUrl}
+        updateMessage={updateMessage}
+        isForceUpdate={isForceUpdate}
+        onDismiss={dismissUpdate}
+      />
     </>
   );
 }
