@@ -58,6 +58,7 @@ export interface RankingState {
   isComplete: boolean;
   tierPosition: number;          // Position within the tier
   finalPosition: number;         // Global position across all tiers
+  tiedWithIndex: number | null;  // Index in tierMovies if user chose "too tough" tie
 }
 
 // ============================================
@@ -471,6 +472,7 @@ export function initializeRankingStateWithTier(
     isComplete: n === 0,  // Skip comparisons if no same-star movies exist
     tierPosition: n === 0 ? 1 : -1,  // Position 1 within tier if first
     finalPosition: -1,
+    tiedWithIndex: null,
   };
 }
 
@@ -492,11 +494,20 @@ export function getCurrentComparison(state: RankingState): Comparison | null {
 
 /**
  * Process user's choice in comparison
- * prefersNewMovie: true = new movie is better, false = existing movie is better
+ * prefersNewMovie: true = new movie is better, false = existing movie is better, null = tie ("too tough")
  */
-export function processComparison(state: RankingState, prefersNewMovie: boolean): RankingState {
+export function processComparison(state: RankingState, prefersNewMovie: boolean | null): RankingState {
   const newState = { ...state };
   newState.comparisons++;
+
+  // Handle tie - "too tough" option
+  if (prefersNewMovie === null) {
+    // End comparison immediately, insert right after the comparison movie with same score
+    newState.isComplete = true;
+    newState.tierPosition = state.comparisonIndex + 2; // 1-indexed, insert after the tied movie
+    newState.tiedWithIndex = state.comparisonIndex;
+    return newState;
+  }
 
   if (prefersNewMovie) {
     // New movie is better, search in upper half (lower positions = better)
@@ -526,13 +537,16 @@ export function processComparison(state: RankingState, prefersNewMovie: boolean)
  * 2. Global position = (count of higher-star movies) + (position within star tier)
  * 3. Display score is calculated using NEIGHBOR-AWARE logic (NOT forced to 10)
  * 4. A 3★ movie's first ranking gets ~6.5, not 10.0
+ * 5. If tiedWithIndex is provided, use the tied movie's exact score (for "too tough" ties)
  */
 export async function saveRanking(
   userId: string,
   movie: Movie,
   tierPosition: number,
   starRating: number,
-  contentType: ContentType = 'movie'
+  contentType: ContentType = 'movie',
+  tiedWithIndex: number | null = null,
+  tierMovies: RankedMovie[] = []
 ): Promise<void> {
   try {
     // Cache the movie with all attributes
@@ -628,10 +642,19 @@ export async function saveRanking(
       throw shiftError;
     }
 
-    // Calculate NEIGHBOR-AWARE score (NOT forced to 10)
-    // Re-fetch rankings after shifting to get accurate neighbor positions
-    const updatedRankings = await getUserRankingsWithRatings(userId, contentType);
-    const displayScore = calculateNeighborAwareScore(globalPosition, updatedRankings, starRating);
+    // Calculate display score
+    let displayScore: number;
+
+    if (tiedWithIndex !== null && tierMovies.length > tiedWithIndex) {
+      // "Too tough" tie - use the exact same score as the tied movie
+      const tiedMovie = tierMovies[tiedWithIndex];
+      displayScore = tiedMovie.ranking.display_score;
+    } else {
+      // Normal case - calculate NEIGHBOR-AWARE score
+      // Re-fetch rankings after shifting to get accurate neighbor positions
+      const updatedRankings = await getUserRankingsWithRatings(userId, contentType);
+      displayScore = calculateNeighborAwareScore(globalPosition, updatedRankings, starRating);
+    }
 
     // Insert the new ranking with calculated display_score
     const { error: insertError } = await supabase.from('rankings').insert({

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,7 +33,7 @@ import { supabase } from '@/lib/supabase';
 import { Movie, ContentType, Activity } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-// Account for: horizontal padding (Spacing.xl each side), VS divider (40px), and gaps (Spacing.md * 2)
+// Account for: horizontal padding (Spacing.xl each side), VS divider, and gaps (Spacing.md * 2)
 const VS_DIVIDER_WIDTH = 40;
 const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - VS_DIVIDER_WIDTH - Spacing.md * 2) / 2;
 const CARD_HEIGHT = CARD_WIDTH * 1.5;
@@ -71,6 +71,11 @@ export default function RankingModal() {
   const { user } = useAuth();
   const { invalidate } = useCache();
 
+  // Track if ranking was completed successfully (to prevent cleanup on successful exit)
+  const [rankingCompleted, setRankingCompleted] = useState(false);
+  // Ref to track rankingCompleted for cleanup effect (closures capture stale state)
+  const rankingCompletedRef = useRef(false);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [rankingState, setRankingState] = useState<RankingState | null>(null);
@@ -97,6 +102,25 @@ export default function RankingModal() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movieId, user, starRatingParam, contentTypeParam]);
+
+  // Cleanup activity on unmount if ranking was not completed
+  // Using useEffect cleanup instead of beforeRemove since native-stack doesn't support preventDefault
+  useEffect(() => {
+    return () => {
+      // This runs when the component unmounts
+      // Use ref to get current value (closures capture stale state)
+      if (!rankingCompletedRef.current && activityId && user) {
+        deleteActivity(activityId)
+          .then(() => {
+            invalidate('activity_delete', user.id);
+          })
+          .catch((error) => {
+            console.error('Error deleting activity on unmount:', error);
+          });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activityId, user]);
 
   const initializeRanking = async (id: number, rating: number, type: ContentType) => {
     try {
@@ -129,7 +153,7 @@ export default function RankingModal() {
     }
   };
 
-  const handleChoice = async (prefersNewMovie: boolean) => {
+  const handleChoice = async (prefersNewMovie: boolean | null) => {
     if (!rankingState) return;
 
     const newState = processComparison(rankingState, prefersNewMovie);
@@ -144,6 +168,9 @@ export default function RankingModal() {
 
   const finishRanking = async (state: RankingState, rating: number, type: ContentType) => {
     console.log(`[Rank Screen] finishRanking: tierPosition=${state.tierPosition}, rating=${rating}, state.starRating=${state.starRating}`);
+    // Mark as completed BEFORE saving so cleanup effect won't delete activity
+    setRankingCompleted(true);
+    rankingCompletedRef.current = true;
     setIsSaving(true);
 
     try {
@@ -153,7 +180,7 @@ export default function RankingModal() {
         await removeRanking(user!.id, state.newMovie.id, type);
       }
 
-      await saveRanking(user!.id, state.newMovie, state.tierPosition, rating, type);
+      await saveRanking(user!.id, state.newMovie, state.tierPosition, rating, type, state.tiedWithIndex, state.tierMovies);
       // Invalidate caches on successful ranking creation
       invalidate('ranking_create', user!.id);
       // Navigate to lists quickly
@@ -166,18 +193,8 @@ export default function RankingModal() {
     }
   };
 
-  // Handle early exit - delete activity if user cancels ranking flow
-  const handleEarlyExit = async () => {
-    // Only delete if we have an activityId (came from log-activity flow)
-    if (activityId) {
-      try {
-        await deleteActivity(activityId);
-        // Invalidate caches since activity was deleted
-        invalidate('activity_create', user!.id);
-      } catch (error) {
-        console.error('Error deleting activity on early exit:', error);
-      }
-    }
+  // Handle early exit - the beforeRemove listener handles activity cleanup
+  const handleEarlyExit = () => {
     router.back();
   };
 
@@ -383,6 +400,14 @@ export default function RankingModal() {
           </View>
         </Pressable>
         </View>
+
+        {/* Too Tough Button */}
+        <Pressable
+          style={({ pressed }) => [styles.tieButton, pressed && styles.tieButtonPressed]}
+          onPress={() => handleChoice(null)}
+        >
+          <Text style={styles.tieButtonText}>Too tough to pick</Text>
+        </Pressable>
 
         {/* Instructions */}
         <View style={styles.instructionsContainer}>
@@ -651,6 +676,24 @@ const styles = StyleSheet.create({
   vsText: {
     fontFamily: Fonts.serifBold,
     fontSize: FontSizes.lg,
+    color: Colors.textMuted,
+  },
+  tieButton: {
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  tieButtonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.98 }],
+  },
+  tieButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
     color: Colors.textMuted,
   },
   instructionsContainer: {

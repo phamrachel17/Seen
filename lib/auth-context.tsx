@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { usePostHog } from 'posthog-react-native';
 import { supabase } from './supabase';
 import { normalizeEmail, isEmail, getEmailByUsername } from './validation';
 import { cache } from './cache';
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const currentPushToken = useRef<string | null>(null);
+  const posthog = usePostHog();
 
   // Setup push notifications for a user
   const setupPushNotifications = async (userId: string) => {
@@ -51,6 +53,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setSession(session);
         setUser(session?.user ?? null);
+        // Identify existing user in PostHog
+        if (session?.user) {
+          posthog?.identify(session.user.id, {
+            email: session.user.email,
+          });
+        }
       }
       setLoading(false);
     });
@@ -60,9 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
 
-      // Setup push notifications when user signs in
+      // Setup push notifications and identify user in PostHog when they sign in
       if (event === 'SIGNED_IN' && session?.user) {
         setupPushNotifications(session.user.id);
+        posthog?.identify(session.user.id, {
+          email: session.user.email,
+        });
       }
     });
 
@@ -126,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       currentPushToken.current = null;
     }
     cache.clear(); // Clear all cached data on logout
+    posthog?.reset(); // Reset PostHog identity on logout
     await supabase.auth.signOut();
   };
 

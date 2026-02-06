@@ -74,9 +74,11 @@ export function CacheProvider({ children }: { children: ReactNode }) {
         break;
 
       case 'activity_delete':
-        // Activity deleted - invalidate feeds and stats
+        // Activity deleted - invalidate feeds, stats, and rankings (for early exit from ranking flow)
         cache.invalidate(CACHE_KEYS.patterns.allFeeds);
         cache.invalidate(CACHE_KEYS.patterns.allUserStats);
+        cache.invalidate(CACHE_KEYS.patterns.allRankings);
+        cache.invalidate(CACHE_KEYS.patterns.allRankingPositions);
         break;
 
       case 'profile_update':
