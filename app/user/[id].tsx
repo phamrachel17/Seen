@@ -30,6 +30,7 @@ import {
   getUserRankingPosition,
 } from '@/lib/follows';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
+import { getProfileInsights, ProfileInsights } from '@/lib/profile-insights';
 import { User, Activity } from '@/types';
 
 interface UserStats {
@@ -68,6 +69,7 @@ export default function UserProfileScreen() {
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
   const [watchlistCount, setWatchlistCount] = useState(0);
   const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
+  const [insights, setInsights] = useState<ProfileInsights | null>(null);
 
   const isOwnProfile = currentUser?.id === userId;
 
@@ -75,13 +77,14 @@ export default function UserProfileScreen() {
     if (!userId || !currentUser) return;
 
     try {
-      const [profile, userStats, counts, followingStatus, position] =
+      const [profile, userStats, counts, followingStatus, position, userInsights] =
         await Promise.all([
           getUserProfile(userId),
           getUserStats(userId),
           getFollowCounts(userId),
           checkIfFollowing(currentUser.id, userId),
           getUserRankingPosition(userId),
+          getProfileInsights(userId),
         ]);
 
       if (profile) {
@@ -91,6 +94,7 @@ export default function UserProfileScreen() {
       setFollowCounts(counts);
       setIsFollowing(followingStatus);
       setRankingPosition(position);
+      setInsights(userInsights);
 
       // Load watchlist count
       const { count: wlCount } = await supabase
@@ -268,7 +272,7 @@ export default function UserProfileScreen() {
             <Text style={styles.usernameUnderAvatar}>@{profileData.username}</Text>
           </View>
 
-          {/* Right: Display Name, Bio, Follow Stats, Follow Button */}
+          {/* Right: Your Name, Bio, Follow Stats, Follow Button */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
               {profileData.display_name || profileData.username}
@@ -392,6 +396,64 @@ export default function UserProfileScreen() {
             icon="play.circle"
           />
         </View>
+
+        {/* Your Taste - Genre Chart & Fun Stats */}
+        {insights && insights.topGenres.length > 0 && (
+          <View style={styles.insightsSection}>
+            <View style={styles.insightsDivider} />
+            <View style={styles.insightsContent}>
+              <Text style={styles.sectionLabel}>THEIR TASTE</Text>
+
+              {/* Genre Chart */}
+              <View style={styles.genreChart}>
+                {insights.topGenres.map((genre) => (
+                  <View key={genre.genre} style={styles.genreRow}>
+                    <Text style={styles.genreLabel} numberOfLines={1}>
+                      {genre.genre}
+                    </Text>
+                    <View style={styles.genreBarContainer}>
+                      <View
+                        style={[styles.genreBar, { width: `${genre.percentage}%` }]}
+                      />
+                    </View>
+                    <Text style={styles.genreCount}>{genre.count}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Fun Facts List */}
+              {(insights.topDirector || insights.topActor || insights.favoriteDecade) && (
+                <View style={styles.funFactsList}>
+                  {insights.topDirector && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE DIRECTOR</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.topDirector.name}
+                      </Text>
+                    </View>
+                  )}
+                  {insights.topActor && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE ACTOR</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.topActor.name}
+                      </Text>
+                    </View>
+                  )}
+                  {insights.favoriteDecade && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE ERA</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.favoriteDecade.decade}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+            <View style={styles.insightsDivider} />
+          </View>
+        )}
 
         {/* Recent Activity */}
         <View style={styles.section}>
@@ -637,6 +699,74 @@ const styles = StyleSheet.create({
   listsSection: {
     marginTop: Spacing.xl,
     paddingHorizontal: Spacing.xl,
+  },
+  insightsSection: {
+    marginTop: Spacing.xl,
+    marginHorizontal: Spacing.xl,
+  },
+  insightsDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  insightsContent: {
+    paddingVertical: Spacing.xl,
+  },
+  genreChart: {
+    marginTop: Spacing.md,
+    gap: Spacing.sm,
+  },
+  genreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  genreLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+    width: 70,
+  },
+  genreBarContainer: {
+    flex: 1,
+    height: 12,
+    backgroundColor: Colors.dust,
+    borderRadius: BorderRadius.full,
+    overflow: 'hidden',
+  },
+  genreBar: {
+    height: '100%',
+    backgroundColor: Colors.stamp,
+    borderRadius: BorderRadius.full,
+  },
+  genreCount: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    width: 24,
+    textAlign: 'right',
+  },
+  funFactsList: {
+    marginTop: Spacing.lg,
+    gap: Spacing.md,
+  },
+  funFactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  funFactLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  funFactValue: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    textAlign: 'right',
+    flexShrink: 1,
+    marginLeft: Spacing.md,
   },
   section: {
     marginTop: Spacing.xl,

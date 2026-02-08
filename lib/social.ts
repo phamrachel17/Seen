@@ -241,7 +241,7 @@ export async function getCommentCount(reviewId: string): Promise<number> {
 interface CreateNotificationData {
   user_id: string;
   actor_id: string;
-  type: 'like' | 'comment' | 'tagged' | 'follow';
+  type: 'like' | 'comment' | 'tagged' | 'follow' | 'reply';
   review_id?: string;
   activity_id?: string; // Maps to review_id column since IDs match
   comment_id?: string;

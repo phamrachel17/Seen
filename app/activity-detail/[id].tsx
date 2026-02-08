@@ -34,12 +34,14 @@ import { useAuth } from '@/lib/auth-context';
 import { Activity, Comment } from '@/types';
 
 export default function ActivityDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, commentId } = useLocalSearchParams<{ id: string; commentId?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
+  const commentRefs = useRef<{ [key: string]: number }>({});
+  const hasScrolledToComment = useRef(false);
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,6 +53,7 @@ export default function ActivityDetailScreen() {
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
 
   const isOwnActivity = user?.id === activity?.user_id;
 
@@ -59,6 +62,24 @@ export default function ActivityDetailScreen() {
       loadActivity();
     }
   }, [id]);
+
+  // Scroll to comment when commentId is provided and comments are loaded
+  useEffect(() => {
+    if (commentId && comments.length > 0 && !hasScrolledToComment.current) {
+      const targetY = commentRefs.current[commentId];
+      if (targetY !== undefined) {
+        hasScrolledToComment.current = true;
+        setHighlightedCommentId(commentId);
+        setTimeout(() => {
+          scrollViewRef.current?.scrollTo({ y: targetY - 100, animated: true });
+        }, 100);
+        // Remove highlight after 2 seconds
+        setTimeout(() => {
+          setHighlightedCommentId(null);
+        }, 2000);
+      }
+    }
+  }, [commentId, comments]);
 
   const loadActivity = async () => {
     try {
@@ -448,9 +469,17 @@ export default function ActivityDetailScreen() {
           ) : (
             <View style={styles.commentsList}>
               {comments.map((comment) => (
-                <View key={comment.id}>
+                <View
+                  key={comment.id}
+                  onLayout={(event) => {
+                    commentRefs.current[comment.id] = event.nativeEvent.layout.y;
+                  }}
+                >
                   {/* Parent Comment */}
-                  <View style={styles.commentItemWrapper}>
+                  <View style={[
+                    styles.commentItemWrapper,
+                    highlightedCommentId === comment.id && styles.highlightedComment,
+                  ]}>
                     <View style={styles.commentItem}>
                       <Pressable onPress={() => handleUserPress(comment.user_id)}>
                         <ProfileAvatar
@@ -519,7 +548,16 @@ export default function ActivityDetailScreen() {
                   {comment.replies && comment.replies.length > 0 && (
                     <View style={styles.repliesContainer}>
                       {comment.replies.map((reply) => (
-                        <View key={reply.id} style={styles.replyItemWrapper}>
+                        <View
+                          key={reply.id}
+                          style={[
+                            styles.replyItemWrapper,
+                            highlightedCommentId === reply.id && styles.highlightedComment,
+                          ]}
+                          onLayout={(event) => {
+                            commentRefs.current[reply.id] = event.nativeEvent.layout.y;
+                          }}
+                        >
                           <View style={styles.commentItem}>
                             <Pressable onPress={() => handleUserPress(reply.user_id)}>
                               <ProfileAvatar
@@ -951,5 +989,11 @@ const styles = StyleSheet.create({
   },
   replyItemWrapper: {
     gap: 2,
+  },
+  highlightedComment: {
+    backgroundColor: Colors.dust,
+    borderRadius: BorderRadius.md,
+    marginHorizontal: -Spacing.xs,
+    paddingHorizontal: Spacing.xs,
   },
 });

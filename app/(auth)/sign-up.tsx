@@ -260,7 +260,7 @@ export default function SignUpScreen() {
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Display Name</Text>
+              <Text style={styles.label}>Your Name</Text>
               <TextInput
                 style={styles.input}
                 value={displayName}

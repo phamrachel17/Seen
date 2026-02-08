@@ -4,20 +4,17 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 
 interface UpdatePromptModalProps {
   visible: boolean;
-  latestVersion: string | null;
+  latestVersion?: string | null;
   storeUrl: string | null;
-  updateMessage: string | null;
-  isForceUpdate: boolean;
-  onDismiss: () => void;
+  updateMessage?: string | null;
+  isForceUpdate?: boolean;
+  onDismiss?: () => void;
 }
 
 export function UpdatePromptModal({
   visible,
-  latestVersion,
   storeUrl,
   updateMessage,
-  isForceUpdate,
-  onDismiss,
 }: UpdatePromptModalProps) {
   const handleUpdate = () => {
     if (storeUrl) {
@@ -30,7 +27,7 @@ export function UpdatePromptModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={isForceUpdate ? undefined : onDismiss}
+      onRequestClose={undefined}
     >
       <View style={styles.overlay}>
         <View style={styles.container}>
@@ -38,11 +35,11 @@ export function UpdatePromptModal({
             <IconSymbol name="arrow.down.app" size={32} color={Colors.stamp} />
           </View>
 
-          <Text style={styles.title}>Update Available</Text>
+          <Text style={styles.title}>Seen just got better</Text>
 
           <Text style={styles.message}>
             {updateMessage ||
-              `A new version of Seen (${latestVersion}) is available with improvements and bug fixes.`}
+              `There's a new version of Seen! I've squashed bugs and made things even better. Update now so you don't miss out on the good stuff.`}
           </Text>
 
           <View style={styles.buttonContainer}>
@@ -56,17 +53,6 @@ export function UpdatePromptModal({
               <Text style={styles.updateButtonText}>Update Now</Text>
             </Pressable>
 
-            {!isForceUpdate && (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.laterButton,
-                  pressed && styles.buttonPressed,
-                ]}
-                onPress={onDismiss}
-              >
-                <Text style={styles.laterButtonText}>Later</Text>
-              </Pressable>
-            )}
           </View>
         </View>
       </View>
@@ -128,15 +114,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
     color: Colors.paper,
-  },
-  laterButton: {
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
-  laterButtonText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
   },
   buttonPressed: {
     opacity: 0.7,

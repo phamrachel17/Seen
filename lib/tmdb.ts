@@ -603,25 +603,27 @@ export async function searchAll(query: string, page: number = 1): Promise<{
 // DISCOVER & PERSON SEARCH FUNCTIONS
 // ============================================
 
-// Discover movies by genre
+// Discover movies by genre (filters for well-known, popular titles)
 export async function discoverMoviesByGenre(genreId: number, page: number = 1): Promise<Movie[]> {
   const data = await tmdbFetch<TMDBSearchResponse>('/discover/movie', {
     with_genres: genreId.toString(),
     sort_by: 'popularity.desc',
     page: page.toString(),
     include_adult: 'false',
+    'vote_count.gte': '500', // Ensure well-known titles with enough votes
   });
 
   return data.results.map((m) => transformMovie(m));
 }
 
-// Discover TV shows by genre
+// Discover TV shows by genre (filters for well-known, popular titles)
 export async function discoverTVShowsByGenre(genreId: number, page: number = 1): Promise<TVShow[]> {
   const data = await tmdbFetch<TMDBTVSearchResponse>('/discover/tv', {
     with_genres: genreId.toString(),
     sort_by: 'popularity.desc',
     page: page.toString(),
     include_adult: 'false',
+    'vote_count.gte': '200', // Ensure well-known titles with enough votes
   });
 
   return data.results.map((s) => transformTVShow(s));
@@ -766,4 +768,30 @@ export async function getPersonMovieCredits(personId: number): Promise<Movie[]> 
     .slice(0, 20);
 
   return movies.map((m) => transformMovie(m));
+}
+
+// ============================================
+// RECOMMENDATIONS FUNCTIONS
+// ============================================
+
+// Get recommended movies (uses user behavior data, better than "similar" which only uses keywords/genres)
+export async function getSimilarMovies(movieId: number): Promise<Movie[]> {
+  try {
+    const data = await tmdbFetch<TMDBSearchResponse>(`/movie/${movieId}/recommendations`);
+    return data.results.slice(0, 10).map((m) => transformMovie(m));
+  } catch (error) {
+    console.error('Error fetching movie recommendations:', error);
+    return [];
+  }
+}
+
+// Get recommended TV shows (uses user behavior data, better than "similar" which only uses keywords/genres)
+export async function getSimilarTVShows(showId: number): Promise<TVShow[]> {
+  try {
+    const data = await tmdbFetch<TMDBTVSearchResponse>(`/tv/${showId}/recommendations`);
+    return data.results.slice(0, 10).map((s) => transformTVShow(s));
+  } catch (error) {
+    console.error('Error fetching TV show recommendations:', error);
+    return [];
+  }
 }

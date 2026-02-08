@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getUserActivities, isActivityInProgress } from '@/lib/activity';
 import { useUserData } from '@/lib/hooks/useUserData';
+import { getProfileInsights, ProfileInsights } from '@/lib/profile-insights';
 import { User, Activity } from '@/types';
 
 export default function ProfileScreen() {
@@ -45,6 +46,7 @@ export default function ProfileScreen() {
   const [profileData, setProfileData] = useState<Pick<User, 'username' | 'profile_image_url' | 'display_name' | 'bio'> | null>(null);
   const [watchlistCount, setWatchlistCount] = useState(0);
   const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
+  const [insights, setInsights] = useState<ProfileInsights | null>(null);
 
   // Ref to track if component is mounted (prevents state updates after unmount)
   const isMountedRef = useRef(true);
@@ -121,6 +123,12 @@ export default function ProfileScreen() {
           (item: Activity) => item.content
         ) as Activity[];
         setRecentActivities(activitiesWithContent);
+      }
+
+      // Load profile insights (genres, director, decade)
+      const insightsData = await getProfileInsights(user.id);
+      if (isMountedRef.current) {
+        setInsights(insightsData);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -211,7 +219,7 @@ export default function ProfileScreen() {
             </Text>
           </Pressable>
 
-          {/* Right: Display Name, Bio, Follow Stats */}
+          {/* Right: Your Name, Bio, Follow Stats */}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>
               {profileData?.display_name || cachedProfile?.display_name || profileData?.username || cachedProfile?.username || user?.user_metadata?.username || 'Cinephile'}
@@ -303,6 +311,67 @@ export default function ProfileScreen() {
             icon="play.circle"
           />
         </View>
+
+        {/* Your Taste - Genre Chart & Fun Stats */}
+        {insights && insights.topGenres.length > 0 && (
+          <View style={styles.insightsSection}>
+            <View style={styles.insightsDivider} />
+            <View style={styles.insightsContent}>
+              <Text style={styles.sectionLabel}>YOUR TASTE</Text>
+
+              {/* Genre Chart */}
+              <View style={styles.genreChart}>
+                {insights.topGenres.map((genre) => (
+                  <View key={genre.genre} style={styles.genreRow}>
+                    <Text style={styles.genreLabel} numberOfLines={1}>
+                      {genre.genre}
+                    </Text>
+                    <View style={styles.genreBarContainer}>
+                      <View
+                        style={[
+                          styles.genreBar,
+                          { width: `${genre.percentage}%` },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.genreCount}>{genre.count}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Fun Facts List */}
+              {(insights.topDirector || insights.topActor || insights.favoriteDecade) && (
+                <View style={styles.funFactsList}>
+                  {insights.topDirector && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE DIRECTOR</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.topDirector.name}
+                      </Text>
+                    </View>
+                  )}
+                  {insights.topActor && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE ACTOR</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.topActor.name}
+                      </Text>
+                    </View>
+                  )}
+                  {insights.favoriteDecade && (
+                    <View style={styles.funFactRow}>
+                      <Text style={styles.funFactLabel}>FAVE ERA</Text>
+                      <Text style={styles.funFactValue}>
+                        {insights.favoriteDecade.decade}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+            <View style={styles.insightsDivider} />
+          </View>
+        )}
 
         {/* Recent Activity */}
         <View style={styles.section}>
@@ -512,17 +581,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   listsSection: {
-    marginTop: Spacing['2xl'],
+    marginTop: Spacing.xl,
     paddingHorizontal: Spacing.xl,
   },
   section: {
-    marginTop: Spacing['2xl'],
+    marginTop: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
     paddingHorizontal: Spacing.xl,
   },
   sectionLabel: {
@@ -577,5 +646,74 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textMuted,
     textAlign: 'center',
+  },
+  // Insights section styles
+  insightsSection: {
+    marginTop: Spacing.xl,
+    marginHorizontal: Spacing.xl,
+  },
+  insightsDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  insightsContent: {
+    paddingVertical: Spacing.xl,
+  },
+  genreChart: {
+    marginTop: Spacing.md,
+    gap: Spacing.sm,
+  },
+  genreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  genreLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+    width: 75,
+  },
+  genreBarContainer: {
+    flex: 1,
+    height: 10,
+    backgroundColor: Colors.dust,
+    borderRadius: BorderRadius.full,
+    overflow: 'hidden',
+  },
+  genreBar: {
+    height: '100%',
+    backgroundColor: Colors.stamp,
+    borderRadius: BorderRadius.full,
+  },
+  genreCount: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    width: 24,
+    textAlign: 'right',
+  },
+  funFactsList: {
+    marginTop: Spacing.lg,
+    gap: Spacing.md,
+  },
+  funFactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  funFactLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  funFactValue: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    textAlign: 'right',
+    flexShrink: 1,
+    marginLeft: Spacing.md,
   },
 });

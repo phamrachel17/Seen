@@ -16,7 +16,7 @@ import { getFollowingIds } from './follows';
 import {
   getTrendingMovies,
   getTrendingTVShows,
-  discoverMoviesByGenres,
+  discoverMoviesByGenre,
   discoverTVShowsByGenre,
   GENRE_IDS,
 } from './tmdb';
@@ -28,15 +28,15 @@ import { ensureContentExists } from './content';
 // ============================================
 
 const SCORE_WEIGHTS = {
-  GENRE_MATCH: 3.0,
+  GENRE_MATCH: 8.0, // Highest priority - user's explicit genre choice must dominate
   FRIEND_WATCHED: 2.0,
   FRIEND_HIGH_RATING: 4.0,
   FRIEND_LOVED: 6.0,
-  USER_HISTORY_GENRE: 2.5,
+  USER_HISTORY_GENRE: 1.5, // Reduced - explicit selection takes priority over history
   TRENDING: 1.5,
   RECENT_RELEASE: 1.0,
   RECENTLY_SUGGESTED: -10.0,
-  RANDOM_BOOST_MAX: 2.0,
+  RANDOM_BOOST_MAX: 1.0, // Minimal randomness for more predictable genre-based picks
 } as const;
 
 // Mood to genre mapping
@@ -209,94 +209,123 @@ async function gatherCandidates(
   const candidates: ContentCandidate[] = [];
   const seenIds = new Set<number>();
 
-  // Determine which genres to fetch
-  let targetGenres = filters.genres || [];
+  // Helper to add movie candidate
+  const addMovieCandidate = (movie: Movie) => {
+    if (!watchedTmdbIds.has(movie.id) && !seenIds.has(movie.id)) {
+      seenIds.add(movie.id);
+      candidates.push({
+        content: movie,
+        tmdbId: movie.id,
+        contentType: 'movie',
+        genres: movie.genres || [],
+        runtime: movie.runtime_minutes,
+        releaseYear: movie.release_year,
+        popularityScore: movie.popularity_score,
+      });
+    }
+  };
 
-  // Add mood-based genres if mood is specified
-  if (filters.mood) {
-    const moodGenres = MOOD_GENRES[filters.mood];
-    targetGenres = [...new Set([...targetGenres, ...moodGenres])];
-  }
+  // Helper to add TV show candidate
+  const addTVCandidate = (show: TVShow) => {
+    if (!watchedTmdbIds.has(show.id) && !seenIds.has(show.id)) {
+      seenIds.add(show.id);
+      candidates.push({
+        content: show,
+        tmdbId: show.id,
+        contentType: 'tv',
+        genres: show.genres || [],
+        runtime: show.episode_runtime,
+        releaseYear: show.release_year,
+        popularityScore: show.popularity_score,
+      });
+    }
+  };
 
-  // Convert genre names to TMDB IDs
-  const genreIds = targetGenres
+  // Determine which genres to fetch - prioritize user-selected genres
+  const userSelectedGenres = filters.genres || [];
+  const hasUserGenres = userSelectedGenres.length > 0;
+
+  // Convert user-selected genre names to TMDB IDs
+  const userGenreIds = userSelectedGenres
     .map((g) => GENRE_NAME_TO_ID[g.toLowerCase()])
     .filter(Boolean);
 
-  if (filters.contentType === 'movie') {
-    // Source 1: Trending movies
-    const trending = await getTrendingMovies();
-    for (const movie of trending) {
-      if (!watchedTmdbIds.has(movie.id) && !seenIds.has(movie.id)) {
-        seenIds.add(movie.id);
-        candidates.push({
-          content: movie,
-          tmdbId: movie.id,
-          contentType: 'movie',
-          genres: movie.genres || [],
-          runtime: movie.runtime_minutes,
-          releaseYear: movie.release_year,
-          popularityScore: movie.popularity_score,
-        });
-      }
-    }
+  // Get mood-based genre IDs (only used if no user genres selected)
+  const moodGenreIds = filters.mood
+    ? MOOD_GENRES[filters.mood]
+        .map((g) => GENRE_NAME_TO_ID[g.toLowerCase()])
+        .filter(Boolean)
+    : [];
 
-    // Source 2: Genre-specific discover (if genres specified)
-    if (genreIds.length > 0) {
-      const genreMovies = await discoverMoviesByGenres(genreIds);
-      for (const movie of genreMovies) {
-        if (!watchedTmdbIds.has(movie.id) && !seenIds.has(movie.id)) {
-          seenIds.add(movie.id);
-          candidates.push({
-            content: movie,
-            tmdbId: movie.id,
-            contentType: 'movie',
-            genres: movie.genres || [],
-            runtime: movie.runtime_minutes,
-            releaseYear: movie.release_year,
-            popularityScore: movie.popularity_score,
-          });
+  if (filters.contentType === 'movie') {
+    // If user selected genres, ONLY use genre-specific content (no trending fallback)
+    if (hasUserGenres) {
+      // Fetch movies for EACH selected genre separately (OR logic, not AND)
+      // This ensures we get movies that match ANY of the selected genres
+      const genrePromises = userGenreIds.map((id) => discoverMoviesByGenre(id));
+      const genreResultsArrays = await Promise.all(genrePromises);
+
+      // Add all genre-specific movies - NO trending fallback when genres are selected
+      for (const movies of genreResultsArrays) {
+        for (const movie of movies) {
+          addMovieCandidate(movie);
         }
+      }
+      // Do NOT add trending - user explicitly chose genres, respect that choice
+    } else if (moodGenreIds.length > 0) {
+      // Mood-based: fetch from mood genres
+      const moodPromises = moodGenreIds.slice(0, 3).map((id) => discoverMoviesByGenre(id));
+      const moodResultsArrays = await Promise.all(moodPromises);
+
+      for (const movies of moodResultsArrays) {
+        for (const movie of movies) {
+          addMovieCandidate(movie);
+        }
+      }
+
+      // Also add trending
+      const trending = await getTrendingMovies();
+      for (const movie of trending) {
+        addMovieCandidate(movie);
+      }
+    } else {
+      // No genres or mood: use trending
+      const trending = await getTrendingMovies();
+      for (const movie of trending) {
+        addMovieCandidate(movie);
       }
     }
   } else {
-    // TV Shows
-    const trending = await getTrendingTVShows();
-    for (const show of trending) {
-      if (!watchedTmdbIds.has(show.id) && !seenIds.has(show.id)) {
-        seenIds.add(show.id);
-        candidates.push({
-          content: show,
-          tmdbId: show.id,
-          contentType: 'tv',
-          genres: show.genres || [],
-          runtime: show.episode_runtime,
-          releaseYear: show.release_year,
-          popularityScore: show.popularity_score,
-        });
-      }
-    }
+    // TV Shows - same logic
+    if (hasUserGenres) {
+      // ONLY use genre-specific content when user selected genres
+      const genrePromises = userGenreIds.map((id) => discoverTVShowsByGenre(id));
+      const genreResultsArrays = await Promise.all(genrePromises);
 
-    // Source 2: Genre-specific discover for TV (if genres specified)
-    if (genreIds.length > 0) {
-      // Fetch TV shows for each selected genre (up to 3) and combine
-      const tvGenrePromises = genreIds.slice(0, 3).map(id => discoverTVShowsByGenre(id));
-      const tvGenreResultsArrays = await Promise.all(tvGenrePromises);
-      const genreShows = tvGenreResultsArrays.flat();
-
-      for (const show of genreShows) {
-        if (!watchedTmdbIds.has(show.id) && !seenIds.has(show.id)) {
-          seenIds.add(show.id);
-          candidates.push({
-            content: show,
-            tmdbId: show.id,
-            contentType: 'tv',
-            genres: show.genres || [],
-            runtime: show.episode_runtime,
-            releaseYear: show.release_year,
-            popularityScore: show.popularity_score,
-          });
+      for (const shows of genreResultsArrays) {
+        for (const show of shows) {
+          addTVCandidate(show);
         }
+      }
+      // Do NOT add trending - user explicitly chose genres, respect that choice
+    } else if (moodGenreIds.length > 0) {
+      const moodPromises = moodGenreIds.slice(0, 3).map((id) => discoverTVShowsByGenre(id));
+      const moodResultsArrays = await Promise.all(moodPromises);
+
+      for (const shows of moodResultsArrays) {
+        for (const show of shows) {
+          addTVCandidate(show);
+        }
+      }
+
+      const trending = await getTrendingTVShows();
+      for (const show of trending) {
+        addTVCandidate(show);
+      }
+    } else {
+      const trending = await getTrendingTVShows();
+      for (const show of trending) {
+        addTVCandidate(show);
       }
     }
   }

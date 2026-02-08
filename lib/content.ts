@@ -64,6 +64,9 @@ async function ensureMovieContent(tmdbId: number): Promise<Content | null> {
   try {
     const movieDetails = await getMovieDetails(tmdbId);
 
+    // Get lead actor (first billed cast member)
+    const leadActor = movieDetails.cast?.[0]?.name || null;
+
     const contentData = {
       tmdb_id: movieDetails.id,
       content_type: 'movie' as ContentType,
@@ -73,6 +76,7 @@ async function ensureMovieContent(tmdbId: number): Promise<Content | null> {
       release_year: movieDetails.release_year,
       runtime_minutes: movieDetails.runtime_minutes,
       director: movieDetails.director,
+      lead_actor: leadActor,
       genres: movieDetails.genres,
       synopsis: movieDetails.synopsis,
       popularity_score: movieDetails.popularity_score,
@@ -103,6 +107,9 @@ async function ensureTVContent(tmdbId: number): Promise<Content | null> {
   try {
     const showDetails = await getTVShowDetails(tmdbId);
 
+    // Get lead actor (first billed cast member)
+    const leadActor = showDetails.cast?.[0]?.name || null;
+
     const contentData = {
       tmdb_id: showDetails.id,
       content_type: 'tv' as ContentType,
@@ -113,6 +120,7 @@ async function ensureTVContent(tmdbId: number): Promise<Content | null> {
       total_seasons: showDetails.total_seasons,
       total_episodes: showDetails.total_episodes,
       episode_runtime: showDetails.episode_runtime,
+      lead_actor: leadActor,
       genres: showDetails.genres,
       synopsis: showDetails.synopsis,
       popularity_score: showDetails.popularity_score,

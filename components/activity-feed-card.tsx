@@ -220,7 +220,13 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
               </Text>
               {' '}
               <Text style={styles.actionVerb}>
-                {isCompleted ? 'ranked' : isBookmarked ? 'added to watchlist' : 'is watching'}
+                {isCompleted
+                  ? activity.rated_season
+                    ? `rated Season ${activity.rated_season} of`
+                    : 'ranked'
+                  : isBookmarked
+                  ? 'added to watchlist'
+                  : 'is watching'}
               </Text>
             </Text>
             <Text style={styles.timestamp}>{formatDate(activity.created_at)}</Text>
@@ -252,13 +258,17 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
           {/* Completed: Show stars and optional numeric score */}
           {isCompleted && activity.star_rating && (
             <View style={styles.ratingRow}>
-              {activity.watch && (
+              {activity.rated_season ? (
+                <View style={styles.watchBadge}>
+                  <Text style={styles.watchBadgeText}>Season {activity.rated_season}</Text>
+                </View>
+              ) : activity.watch ? (
                 <View style={styles.watchBadge}>
                   <Text style={styles.watchBadgeText}>Watch #{activity.watch.watch_number}</Text>
                 </View>
-              )}
+              ) : null}
               {renderStars(activity.star_rating)}
-              {rankingScore !== null && (
+              {!activity.rated_season && rankingScore !== null && (
                 <Text style={styles.numericScore}> · {rankingScore.toFixed(1)}</Text>
               )}
             </View>

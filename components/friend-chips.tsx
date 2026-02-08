@@ -226,7 +226,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.xs,
     color: Colors.textSecondary,
-    maxWidth: 60,
   },
   moreText: {
     fontFamily: Fonts.sans,

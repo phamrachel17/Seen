@@ -80,13 +80,19 @@ export default function NotificationsScreen() {
 
     // Navigate based on notification type
     switch (notification.type) {
-      case 'like':
       case 'comment':
+      case 'reply':
+        // Navigate to activity detail page with comment_id to scroll to
+        if (notification.activity?.id) {
+          const commentParam = notification.comment_id ? `?commentId=${notification.comment_id}` : '';
+          router.push(`/activity-detail/${notification.activity.id}${commentParam}` as any);
+        }
+        break;
+      case 'like':
       case 'tagged':
-        // Navigate to title detail page using activity content info
-        if (notification.activity?.content) {
-          const { tmdb_id, content_type } = notification.activity.content;
-          router.push(`/title/${tmdb_id}?type=${content_type}` as any);
+        // Navigate to activity detail page
+        if (notification.activity?.id) {
+          router.push(`/activity-detail/${notification.activity.id}` as any);
         }
         break;
       case 'follow':

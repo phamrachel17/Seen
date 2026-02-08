@@ -91,12 +91,18 @@ export default function DiscoverScreen() {
   const [actionMovies, setActionMovies] = useState<Movie[]>([]);
   const [comedyMovies, setComedyMovies] = useState<Movie[]>([]);
   const [dramaMovies, setDramaMovies] = useState<Movie[]>([]);
+  const [horrorMovies, setHorrorMovies] = useState<Movie[]>([]);
+  const [romanceMovies, setRomanceMovies] = useState<Movie[]>([]);
+  const [thrillerMovies, setThrillerMovies] = useState<Movie[]>([]);
 
   // TV Show content state
   const [trendingTVShows, setTrendingTVShows] = useState<TVShow[]>([]);
   const [actionTVShows, setActionTVShows] = useState<TVShow[]>([]);
   const [comedyTVShows, setComedyTVShows] = useState<TVShow[]>([]);
   const [dramaTVShows, setDramaTVShows] = useState<TVShow[]>([]);
+  const [horrorTVShows, setHorrorTVShows] = useState<TVShow[]>([]);
+  const [romanceTVShows, setRomanceTVShows] = useState<TVShow[]>([]);
+  const [thrillerTVShows, setThrillerTVShows] = useState<TVShow[]>([]);
 
   // Loading states
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
@@ -222,14 +228,20 @@ export default function DiscoverScreen() {
   const loadGenreRows = async () => {
     try {
       setIsLoadingGenres(true);
-      const [action, comedy, drama] = await Promise.all([
+      const [action, comedy, drama, horror, romance, thriller] = await Promise.all([
         discoverMoviesByGenre(GENRE_IDS.action),
         discoverMoviesByGenre(GENRE_IDS.comedy),
         discoverMoviesByGenre(GENRE_IDS.drama),
+        discoverMoviesByGenre(GENRE_IDS.horror),
+        discoverMoviesByGenre(GENRE_IDS.romance),
+        discoverMoviesByGenre(GENRE_IDS.thriller),
       ]);
       setActionMovies(action.slice(0, 10));
       setComedyMovies(comedy.slice(0, 10));
       setDramaMovies(drama.slice(0, 10));
+      setHorrorMovies(horror.slice(0, 10));
+      setRomanceMovies(romance.slice(0, 10));
+      setThrillerMovies(thriller.slice(0, 10));
     } catch (error) {
       console.error('Error loading genre rows:', error);
     } finally {
@@ -266,14 +278,20 @@ export default function DiscoverScreen() {
   const loadTVGenreRows = async () => {
     try {
       setIsLoadingTVGenres(true);
-      const [action, comedy, drama] = await Promise.all([
+      const [action, comedy, drama, horror, romance, thriller] = await Promise.all([
         discoverTVShowsByGenre(GENRE_IDS.action),
         discoverTVShowsByGenre(GENRE_IDS.comedy),
         discoverTVShowsByGenre(GENRE_IDS.drama),
+        discoverTVShowsByGenre(GENRE_IDS.horror),
+        discoverTVShowsByGenre(GENRE_IDS.romance),
+        discoverTVShowsByGenre(GENRE_IDS.thriller),
       ]);
       setActionTVShows(action.slice(0, 10));
       setComedyTVShows(comedy.slice(0, 10));
       setDramaTVShows(drama.slice(0, 10));
+      setHorrorTVShows(horror.slice(0, 10));
+      setRomanceTVShows(romance.slice(0, 10));
+      setThrillerTVShows(thriller.slice(0, 10));
     } catch (error) {
       console.error('Error loading TV genre rows:', error);
     } finally {
@@ -354,8 +372,12 @@ export default function DiscoverScreen() {
     if (!searchQuery.trim()) {
       setSearchResults([]);
       setUserResults([]);
+      setIsSearching(false);
       return;
     }
+
+    // Show loading immediately when user types for responsive feedback
+    setIsSearching(true);
 
     // Create AbortController to cancel in-flight requests
     const abortController = new AbortController();
@@ -364,7 +386,6 @@ export default function DiscoverScreen() {
       // Check if already aborted before starting
       if (abortController.signal.aborted) return;
 
-      setIsSearching(true);
       try {
         if (searchMode === 'movies' || searchMode === 'tv') {
           const { results } = await searchAll(searchQuery);
@@ -397,7 +418,7 @@ export default function DiscoverScreen() {
           setIsSearching(false);
         }
       }
-    }, 400);
+    }, 300);
 
     return () => {
       clearTimeout(timeoutId);
@@ -886,6 +907,24 @@ export default function DiscoverScreen() {
               movies={dramaMovies}
               isLoading={isLoadingGenres}
             />
+
+            <HorizontalMovieRow
+              title="Horror"
+              movies={horrorMovies}
+              isLoading={isLoadingGenres}
+            />
+
+            <HorizontalMovieRow
+              title="Romance"
+              movies={romanceMovies}
+              isLoading={isLoadingGenres}
+            />
+
+            <HorizontalMovieRow
+              title="Thriller"
+              movies={thrillerMovies}
+              isLoading={isLoadingGenres}
+            />
           </>
         ) : searchMode === 'tv' ? (
           <>
@@ -916,6 +955,27 @@ export default function DiscoverScreen() {
             <HorizontalMovieRow
               title="Drama"
               movies={dramaTVShows}
+              isLoading={isLoadingTVGenres}
+              type="tv"
+            />
+
+            <HorizontalMovieRow
+              title="Horror"
+              movies={horrorTVShows}
+              isLoading={isLoadingTVGenres}
+              type="tv"
+            />
+
+            <HorizontalMovieRow
+              title="Romance"
+              movies={romanceTVShows}
+              isLoading={isLoadingTVGenres}
+              type="tv"
+            />
+
+            <HorizontalMovieRow
+              title="Thriller"
+              movies={thrillerTVShows}
               isLoading={isLoadingTVGenres}
               type="tv"
             />

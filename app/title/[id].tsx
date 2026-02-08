@@ -20,7 +20,8 @@ import { StarDisplay } from '@/components/ui/star-display';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { AddToListModal } from '@/components/add-to-list-modal';
-import { getMovieDetails, getTVShowDetails } from '@/lib/tmdb';
+import { getMovieDetails, getTVShowDetails, getSimilarMovies, getSimilarTVShows } from '@/lib/tmdb';
+import { HorizontalMovieRow } from '@/components/horizontal-movie-row';
 import { getExternalRatings } from '@/lib/omdb';
 import { getContentByTmdbId, ensureContentExists } from '@/lib/content';
 import {
@@ -38,6 +39,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { getFollowingIds } from '@/lib/follows';
 import {
+  Movie,
+  TVShow,
   MovieDetails,
   TVShowDetails,
   Content,
@@ -102,6 +105,9 @@ export default function TitleDetailScreen() {
   const [selectedSeasonForRating, setSelectedSeasonForRating] = useState<number | null>(null);
   const [showAllSeasons, setShowAllSeasons] = useState(false);
 
+  // Similar content
+  const [similarContent, setSimilarContent] = useState<(Movie | TVShow)[]>([]);
+
   useEffect(() => {
     if (id) {
       loadContent(parseInt(id, 10), type || 'movie');
@@ -136,11 +142,19 @@ export default function TitleDetailScreen() {
 
       // Load content details from TMDB
       if (contentType === 'movie') {
-        const details = await getMovieDetails(tmdbId);
+        const [details, similar] = await Promise.all([
+          getMovieDetails(tmdbId),
+          getSimilarMovies(tmdbId),
+        ]);
         setMovieDetails(details);
+        setSimilarContent(similar);
       } else {
-        const details = await getTVShowDetails(tmdbId);
+        const [details, similar] = await Promise.all([
+          getTVShowDetails(tmdbId),
+          getSimilarTVShows(tmdbId),
+        ]);
         setTVDetails(details);
+        setSimilarContent(similar);
       }
 
       // Ensure content exists in DB
@@ -858,6 +872,17 @@ export default function TitleDetailScreen() {
         {(cast.length > 0 || crew.length > 0) && (
           <CastCrewSection cast={cast} crew={crew} />
         )}
+
+        {/* Similar Content Section */}
+        {similarContent.length > 0 && (
+          <View style={styles.similarSection}>
+            <HorizontalMovieRow
+              title="More Like This"
+              movies={similarContent}
+              type={contentType}
+            />
+          </View>
+        )}
       </Animated.ScrollView>
 
       {/* Add to List Modal */}
@@ -1388,5 +1413,8 @@ const styles = StyleSheet.create({
   friendsActivityList: {
     gap: Spacing.md,
     marginTop: Spacing.md,
+  },
+  similarSection: {
+    marginTop: Spacing.lg,
   },
 });
