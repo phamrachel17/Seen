@@ -14,6 +14,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { ProfileListRow } from '@/components/profile-list-row';
 import { useAuth } from '@/lib/auth-context';
@@ -433,18 +434,7 @@ export default function UserProfileScreen() {
                   )}
                   {activity.star_rating && (
                     <View style={styles.recentStars}>
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <IconSymbol
-                          key={star}
-                          name={star <= activity.star_rating! ? 'star.fill' : 'star'}
-                          size={10}
-                          color={
-                            star <= activity.star_rating!
-                              ? Colors.starFilled
-                              : Colors.starEmpty
-                          }
-                        />
-                      ))}
+                      <StarDisplay rating={activity.star_rating} size={10} />
                     </View>
                   )}
                 </Pressable>

@@ -358,9 +358,11 @@ function scoreCandidates(
       breakdown.friendWatched = SCORE_WEIGHTS.FRIEND_WATCHED;
 
       if (friendActivity.starRating) {
-        if (friendActivity.starRating === 5) {
+        // 4.5★ or 5★ = loved it
+        if (friendActivity.starRating >= 4.5) {
           breakdown.friendHighRating = SCORE_WEIGHTS.FRIEND_LOVED;
-        } else if (friendActivity.starRating >= 4) {
+        } else if (friendActivity.starRating >= 3.5) {
+          // 3.5★ or 4★ = highly rated
           breakdown.friendHighRating = SCORE_WEIGHTS.FRIEND_HIGH_RATING;
         }
       }
@@ -448,24 +450,28 @@ function weightedRandomSelect(count: number): number {
 // ============================================
 
 function generateExplanation(candidate: ScoredCandidate): PickExplanation {
-  // Priority 1: Friend loved it (5 stars)
-  if (candidate.friendActivity?.starRating === 5) {
+  // Priority 1: Friend loved it (4.5★ or 5★)
+  if (candidate.friendActivity?.starRating && candidate.friendActivity.starRating >= 4.5) {
     return {
       type: 'friend_loved',
       text: `Because ${candidate.friendActivity.username} loved it`,
       friendName: candidate.friendActivity.username,
-      friendRating: 5,
+      friendRating: candidate.friendActivity.starRating,
     };
   }
 
-  // Priority 2: Friend watched and rated highly
+  // Priority 2: Friend watched and rated highly (3.5★ or 4★)
   if (
     candidate.friendActivity?.starRating &&
-    candidate.friendActivity.starRating >= 4
+    candidate.friendActivity.starRating >= 3.5
   ) {
+    // Format rating for display (e.g., "4.5 stars" or "4 stars")
+    const ratingText = Number.isInteger(candidate.friendActivity.starRating)
+      ? `${candidate.friendActivity.starRating} stars`
+      : `${candidate.friendActivity.starRating} stars`;
     return {
       type: 'friend_watched',
-      text: `${candidate.friendActivity.username} gave it ${candidate.friendActivity.starRating} stars`,
+      text: `${candidate.friendActivity.username} gave it ${ratingText}`,
       friendName: candidate.friendActivity.username,
       friendRating: candidate.friendActivity.starRating,
     };

@@ -7,11 +7,13 @@ import Animated, { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { HeartAnimation } from '@/components/ui/heart-animation';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { formatProgress } from '@/lib/activity';
 import { getActivityLikes, toggleActivityLike, getActivityCommentCount, createNotification } from '@/lib/social';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { Activity } from '@/types';
 
@@ -42,10 +44,29 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
   const [commentCount, setCommentCount] = useState(0);
   const [showHeart, setShowHeart] = useState(false);
   const [isCritiqueExpanded, setIsCritiqueExpanded] = useState(false);
+  const [rankingScore, setRankingScore] = useState<number | null>(null);
 
   useEffect(() => {
     loadInteractions();
   }, [activity.id, refreshKey]);
+
+  // Fetch ranking score if activity is completed and has content
+  useEffect(() => {
+    const loadRanking = async () => {
+      if (!content) return;
+      const { data } = await supabase
+        .from('rankings')
+        .select('display_score')
+        .eq('user_id', activity.user_id)
+        .eq('movie_id', content.tmdb_id)
+        .eq('content_type', content.content_type)
+        .maybeSingle();
+      if (data) setRankingScore(data.display_score);
+    };
+    if (activity.status === 'completed' && content) {
+      loadRanking();
+    }
+  }, [content?.tmdb_id, activity.user_id, activity.status]);
 
   const loadInteractions = async () => {
     const [likes, comments] = await Promise.all([
@@ -165,18 +186,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
   };
 
   const renderStars = (rating: number) => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <IconSymbol
-            key={star}
-            name={star <= rating ? 'star.fill' : 'star'}
-            size={12}
-            color={star <= rating ? Colors.starFilled : Colors.starEmpty}
-          />
-        ))}
-      </View>
-    );
+    return <StarDisplay rating={rating} size={12} />;
   };
 
   // Double-tap gesture for liking
@@ -239,7 +249,7 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
             {content.title}
           </Text>
 
-          {/* Completed: Show stars */}
+          {/* Completed: Show stars and optional numeric score */}
           {isCompleted && activity.star_rating && (
             <View style={styles.ratingRow}>
               {activity.watch && (
@@ -248,6 +258,9 @@ export const ActivityFeedCard = React.memo(function ActivityFeedCard({
                 </View>
               )}
               {renderStars(activity.star_rating)}
+              {rankingScore !== null && (
+                <Text style={styles.numericScore}> · {rankingScore.toFixed(1)}</Text>
+              )}
             </View>
           )}
 
@@ -371,7 +384,7 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.cardBackground,
     borderRadius: BorderRadius.md,
-    padding: Spacing.md,
+    padding: Spacing.sm,
   },
   pressed: {
     opacity: 0.95,
@@ -380,7 +393,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   userInfo: {
     flexDirection: 'row',
@@ -447,7 +460,13 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  numericScore: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
+    marginLeft: Spacing.xs,
   },
   starsContainer: {
     flexDirection: 'row',
@@ -457,7 +476,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   progressText: {
     fontFamily: Fonts.sansSemiBold,
@@ -502,8 +521,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.lg,
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
@@ -511,7 +530,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs,
     paddingRight: Spacing.md,
   },
   actionCount: {

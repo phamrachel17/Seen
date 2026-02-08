@@ -132,21 +132,6 @@ export default function ActivityHistoryScreen() {
     }
   };
 
-  const renderStars = (rating: number) => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <IconSymbol
-            key={star}
-            name={star <= rating ? 'star.fill' : 'star'}
-            size={14}
-            color={star <= rating ? Colors.starFilled : Colors.starEmpty}
-          />
-        ))}
-      </View>
-    );
-  };
-
   const renderWatchHeader = (watch: WatchWithActivities) => {
     const isLegacy = watch.id === 'legacy';
     const statusColor = getWatchStatusColor(watch.status);

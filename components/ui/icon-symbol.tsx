@@ -29,6 +29,7 @@ const MAPPING = {
   'bookmark.fill': 'bookmark',
   'star': 'star-outline',
   'star.fill': 'star',
+  'star.leadinghalf.filled': 'star-half',
   'bell': 'notifications-none',
   'bell.fill': 'notifications',
   'plus': 'add',

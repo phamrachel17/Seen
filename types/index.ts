@@ -169,7 +169,7 @@ export interface Activity {
   watch_id?: string;
   watch?: Watch;
   // Completed activity fields
-  star_rating?: number; // 1-5, only for completed
+  star_rating?: number; // 1-5 with half-star increments (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5), only for completed
   review_text?: string;
   // In Progress activity fields
   note?: string;
@@ -191,7 +191,7 @@ export interface Review {
   id: string;
   user_id: string;
   movie_id: number;
-  star_rating: number; // 1-5
+  star_rating: number; // 1-5 with half-star increments (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5)
   review_text?: string;
   is_private: boolean;
   tagged_friends: string[];
@@ -271,18 +271,21 @@ export interface Comment {
   content: string;
   created_at: string;
   updated_at: string;
+  parent_id?: string | null; // ID of parent comment if this is a reply
   // Joined data
   user?: Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>;
   // Like data (populated when fetching with likes)
   like_count?: number;
   liked_by_user?: boolean;
+  // Nested replies (populated when fetching threaded comments)
+  replies?: Comment[];
 }
 
 export interface Notification {
   id: string;
   user_id: string;
   actor_id: string;
-  type: 'like' | 'comment' | 'tagged' | 'follow';
+  type: 'like' | 'comment' | 'tagged' | 'follow' | 'reply';
   review_id?: string; // Maps to activity_log.id
   comment_id?: string;
   read: boolean;
@@ -413,6 +416,22 @@ export interface PushToken {
   expo_push_token: string;
   device_name?: string;
   platform?: 'ios' | 'android' | 'web';
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================
+// SEASON RATINGS (TV Shows)
+// ============================================
+
+// Per-season star ratings for TV shows (separate from overall show ranking)
+export interface SeasonRating {
+  id: string;
+  user_id: string;
+  content_id: number;
+  season_number: number;
+  star_rating: number; // 1-5 with half-star increments
+  review_text?: string; // Optional mini review (visible to friends)
   created_at: string;
   updated_at: string;
 }

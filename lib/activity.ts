@@ -16,7 +16,7 @@ export interface CreateActivityParams {
   progressSeason?: number;
   progressEpisode?: number;
   // Common fields
-  watchDate?: Date;
+  watchDate?: Date | null;
   taggedFriends?: string[];
   isPrivate?: boolean;
   ratedSeason?: number;
@@ -33,7 +33,7 @@ export interface UpdateActivityParams {
   progressMinutes?: number;
   progressSeason?: number;
   progressEpisode?: number;
-  watchDate?: Date;
+  watchDate?: Date | null;
   taggedFriends?: string[];
   isPrivate?: boolean;
   ratedSeason?: number;
@@ -132,7 +132,7 @@ export async function updateActivity(params: UpdateActivityParams): Promise<Acti
   if (params.progressMinutes !== undefined) updateData.progress_minutes = params.progressMinutes;
   if (params.progressSeason !== undefined) updateData.progress_season = params.progressSeason;
   if (params.progressEpisode !== undefined) updateData.progress_episode = params.progressEpisode;
-  if (params.watchDate !== undefined) updateData.watch_date = params.watchDate.toISOString().split('T')[0];
+  if (params.watchDate !== undefined) updateData.watch_date = params.watchDate?.toISOString().split('T')[0] ?? null;
   if (params.taggedFriends !== undefined) updateData.tagged_friends = params.taggedFriends;
   if (params.isPrivate !== undefined) updateData.is_private = params.isPrivate;
   if (params.ratedSeason !== undefined) updateData.rated_season = params.ratedSeason;

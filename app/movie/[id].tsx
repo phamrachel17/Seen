@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { ProfileAvatar } from '@/components/profile-avatar';
@@ -369,14 +370,7 @@ export default function MovieDetailScreen() {
               >
                 <View style={styles.reviewHeader}>
                   <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <IconSymbol
-                        key={star}
-                        name={star <= userReview.star_rating ? 'star.fill' : 'star'}
-                        size={16}
-                        color={star <= userReview.star_rating ? Colors.starFilled : Colors.starEmpty}
-                      />
-                    ))}
+                    <StarDisplay rating={userReview.star_rating} size={16} />
                   </View>
                 </View>
                 {userReview.review_text ? (
@@ -426,14 +420,7 @@ export default function MovieDetailScreen() {
                     </Text>
                   </Pressable>
                   <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <IconSymbol
-                        key={star}
-                        name={star <= review.star_rating ? 'star.fill' : 'star'}
-                        size={12}
-                        color={star <= review.star_rating ? Colors.starFilled : Colors.starEmpty}
-                      />
-                    ))}
+                    <StarDisplay rating={review.star_rating} size={12} />
                   </View>
                 </View>
                 {review.review_text && (

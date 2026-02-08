@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { AddToListModal } from '@/components/add-to-list-modal';
@@ -45,8 +46,11 @@ import {
   Ranking,
   Watch,
   ExternalRatings,
+  SeasonRating,
 } from '@/types';
 import { ActivityFeedCard } from '@/components/activity-feed-card';
+import { getSeasonRatings } from '@/lib/season-ratings';
+import { SeasonRatingSheet } from '@/components/season-rating-sheet';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HEADER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.35);
@@ -92,6 +96,11 @@ export default function TitleDetailScreen() {
 
   // Add to list modal
   const [showAddToListModal, setShowAddToListModal] = useState(false);
+
+  // Season ratings (TV shows only)
+  const [seasonRatings, setSeasonRatings] = useState<SeasonRating[]>([]);
+  const [selectedSeasonForRating, setSelectedSeasonForRating] = useState<number | null>(null);
+  const [showAllSeasons, setShowAllSeasons] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -197,6 +206,12 @@ export default function TitleDetailScreen() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setFriendsActivities(uniqueActivities.slice(0, 5));
+
+      // Load season ratings for TV shows
+      if (contentType === 'tv') {
+        const ratings = await getSeasonRatings(user.id, contentId);
+        setSeasonRatings(ratings);
+      }
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -601,16 +616,34 @@ export default function TitleDetailScreen() {
           {/* Synopsis */}
           {synopsis && <Text style={styles.synopsis}>{synopsis}</Text>}
 
-          {/* Log Activity Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.logActivityButton,
-              pressed && styles.buttonPressed,
-            ]}
-            onPress={() => openLogActivity()}
-          >
-            <Text style={styles.logActivityButtonText}>Log Activity</Text>
-          </Pressable>
+          {/* Action Buttons Row */}
+          <View style={styles.actionButtonsRow}>
+            {/* Rank/Re-rank Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionButton,
+                styles.rankButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={() => openLogActivity()}
+            >
+              <Text style={styles.actionButtonText}>
+                {completedActivity ? 'Re-rank' : 'Rank'}
+              </Text>
+            </Pressable>
+
+            {/* Log Progress Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionButton,
+                styles.logProgressButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={() => openLogActivity(false, true)}
+            >
+              <Text style={styles.logProgressButtonText}>Log Progress</Text>
+            </Pressable>
+          </View>
 
           {/* Your Take Section (Completed) */}
           {completedActivity && (
@@ -664,14 +697,7 @@ export default function TitleDetailScreen() {
                         <Text style={styles.watchNumberText}>Watch #{completedActivity.watch.watch_number}</Text>
                       </View>
                     )}
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <IconSymbol
-                        key={star}
-                        name={star <= (completedActivity.star_rating || 0) ? 'star.fill' : 'star'}
-                        size={16}
-                        color={star <= (completedActivity.star_rating || 0) ? Colors.starFilled : Colors.starEmpty}
-                      />
-                    ))}
+                    <StarDisplay rating={completedActivity.star_rating || 0} size={16} />
                   </View>
                 </View>
                 {completedActivity.review_text && (
@@ -698,6 +724,66 @@ export default function TitleDetailScreen() {
               </Pressable>
             </View>
           )}
+
+          {/* Season Ratings Section - TV Shows Only */}
+          {contentType === 'tv' && tvDetails?.seasons && tvDetails.seasons.length > 0 && (() => {
+            const allSeasons = tvDetails.seasons.filter(s => s.season_number > 0);
+            const displayedSeasons = showAllSeasons ? allSeasons : allSeasons.slice(0, 3);
+            const hasMoreSeasons = allSeasons.length > 3;
+
+            return (
+              <View style={styles.seasonRatingsSection}>
+                <Text style={styles.sectionLabel}>Your Season Ratings:</Text>
+                <View style={styles.seasonRatingsList}>
+                  {displayedSeasons.map((season, index) => {
+                    const rating = seasonRatings.find(r => r.season_number === season.season_number);
+                    const isLast = index === displayedSeasons.length - 1 && !hasMoreSeasons;
+                    return (
+                      <Pressable
+                        key={season.season_number}
+                        style={({ pressed }) => [
+                          styles.seasonRatingRow,
+                          !isLast && styles.seasonRatingRowBorder,
+                          pressed && styles.seasonRatingRowPressed,
+                        ]}
+                        onPress={() => setSelectedSeasonForRating(season.season_number)}
+                      >
+                        <View style={styles.seasonRatingLeft}>
+                          <Text style={styles.seasonLabel}>Season {season.season_number}</Text>
+                          {rating?.review_text && (
+                            <Text style={styles.seasonReviewPreview} numberOfLines={1}>
+                              <Text style={styles.seasonReviewLabel}>Critique: </Text>
+                              {rating.review_text}
+                            </Text>
+                          )}
+                        </View>
+                        {rating ? (
+                          <StarDisplay rating={rating.star_rating} size={14} />
+                        ) : (
+                          <Text style={styles.rateSeasonHint}>Tap to rate</Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                  {hasMoreSeasons && (
+                    <Pressable
+                      style={styles.showAllSeasonsButton}
+                      onPress={() => setShowAllSeasons(!showAllSeasons)}
+                    >
+                      <Text style={styles.showAllSeasonsText}>
+                        {showAllSeasons ? 'Show less' : `Show all ${allSeasons.length} seasons`}
+                      </Text>
+                      <IconSymbol
+                        name={showAllSeasons ? 'chevron.up' : 'chevron.down'}
+                        size={14}
+                        color={Colors.stamp}
+                      />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            );
+          })()}
 
           {/* Your Progress Section (In Progress) */}
           {inProgressActivity && (
@@ -781,6 +867,24 @@ export default function TitleDetailScreen() {
           onClose={() => setShowAddToListModal(false)}
           contentId={content.id}
           contentTitle={title}
+        />
+      )}
+
+      {/* Season Rating Sheet - TV Shows Only */}
+      {content && selectedSeasonForRating !== null && (
+        <SeasonRatingSheet
+          visible={selectedSeasonForRating !== null}
+          onClose={() => setSelectedSeasonForRating(null)}
+          onSave={async () => {
+            // Reload season ratings after save
+            if (user) {
+              const ratings = await getSeasonRatings(user.id, content.id);
+              setSeasonRatings(ratings);
+            }
+          }}
+          contentId={content.id}
+          seasonNumber={selectedSeasonForRating}
+          showTitle={title}
         />
       )}
     </View>
@@ -1028,14 +1132,30 @@ const styles = StyleSheet.create({
     lineHeight: FontSizes.md * 1.6,
     marginBottom: Spacing.xl,
   },
-  logActivityButton: {
-    paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.sm,
-    alignItems: 'center',
-    backgroundColor: Colors.stamp,
+  actionButtonsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
     marginBottom: Spacing.md,
   },
-  logActivityButtonText: {
+  actionButton: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+  },
+  rankButton: {
+    backgroundColor: Colors.stamp,
+  },
+  logProgressButton: {
+    backgroundColor: Colors.stamp,
+  },
+  actionButtonText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.white,
+    letterSpacing: 1,
+  },
+  logProgressButtonText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.sm,
     color: Colors.white,
@@ -1050,6 +1170,64 @@ const styles = StyleSheet.create({
   },
   yourProgressSection: {
     marginBottom: Spacing.xl,
+  },
+  seasonRatingsSection: {
+    marginBottom: Spacing.xl,
+  },
+  seasonRatingsList: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    marginTop: Spacing.md,
+  },
+  seasonRatingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+  },
+  seasonRatingRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  seasonRatingRowPressed: {
+    backgroundColor: Colors.dust,
+  },
+  seasonRatingLeft: {
+    flex: 1,
+    marginRight: Spacing.md,
+  },
+  seasonLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+  },
+  seasonReviewPreview: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+  },
+  seasonReviewLabel: {
+    fontFamily: Fonts.sansBold,
+  },
+  rateSeasonHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  showAllSeasonsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.md,
+  },
+  showAllSeasonsText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
   },
   yourTakeHeader: {
     flexDirection: 'row',

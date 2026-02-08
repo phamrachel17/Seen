@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { getReviewLikes, toggleLike, getCommentCount, createNotification } from '@/lib/social';
@@ -134,18 +135,7 @@ export function FeedCard({ review, onLikeChange }: FeedCardProps) {
   };
 
   const renderStars = (rating: number) => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <IconSymbol
-            key={star}
-            name={star <= rating ? 'star.fill' : 'star'}
-            size={12}
-            color={star <= rating ? Colors.starFilled : Colors.starEmpty}
-          />
-        ))}
-      </View>
-    );
+    return <StarDisplay rating={rating} size={12} />;
   };
 
   return (

@@ -31,7 +31,9 @@ import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/the
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { StarRating } from '@/components/star-rating';
 import { SuggestedFriendPills } from '@/components/suggested-friend-pills';
+import { SelectedFriendsDisplay } from '@/components/selected-friends-display';
 import { useAuth } from '@/lib/auth-context';
+import { createNotification } from '@/lib/social';
 import { useCache } from '@/lib/cache-context';
 import { getPendingFriendSelection } from '@/lib/friend-picker-state';
 import { getContentById, ensureContentExists } from '@/lib/content';
@@ -54,7 +56,7 @@ import { getMovieDetails, getTVShowDetails, getSeasonDetails } from '@/lib/tmdb'
 import { Content, ContentType, MovieDetails, TVShowDetails, Episode, ActivityStatus } from '@/types';
 import { deleteRankingWithActivity } from '@/lib/ranking';
 
-type Step = 'existing_choice' | 'watch_conflict' | 'status' | 'completed' | 'in_progress';
+type Step = 'watch_conflict' | 'status' | 'completed' | 'in_progress';
 
 // Movie Progress Slider Component
 const MovieProgressSlider = ({
@@ -461,7 +463,7 @@ export default function LogActivityModal() {
   const [nextWatchNumber, setNextWatchNumber] = useState<number>(1);
 
   // Common form state
-  const [watchDate, setWatchDate] = useState<Date>(new Date());
+  const [watchDate, setWatchDate] = useState<Date | null>(null);
   const [taggedFriends, setTaggedFriends] = useState<string[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
 
@@ -585,12 +587,12 @@ export default function LogActivityModal() {
             setSelectedStatus('completed');
             setStep('completed');
             setSkipRanking(true);  // Don't trigger ranking on save
-          } else if (params.editMode === 'true') {
-            // editMode skips to edit form with rating (for re-ranking)
-            setSelectedStatus('completed');
-            setStep('completed');  // Skip choice screen, go directly to edit form
+          } else if (params.editInProgress === 'true') {
+            // editInProgress - don't set step here, let the in-progress logic handle it
           } else {
-            setStep('existing_choice');  // Show choice screen
+            // Default: go directly to completed form for re-ranking
+            setSelectedStatus('completed');
+            setStep('completed');
           }
         }
         // Pre-fill in-progress form ONLY if it belongs to the current active watch
@@ -619,6 +621,22 @@ export default function LogActivityModal() {
           setProgressMinutes('');
           setProgressSeason(1);
           setProgressEpisode(1);
+          // If editInProgress param is set, go directly to in-progress form
+          if (params.editInProgress === 'true') {
+            setSelectedStatus('in_progress');
+            setStep('in_progress');
+          }
+        } else if (params.editInProgress === 'true') {
+          // No existing in-progress activity, but editInProgress param is set
+          setSelectedStatus('in_progress');
+          setStep('in_progress');
+        }
+
+        // Default mode (Rank button): skip directly to completed form for new entries
+        // Only if no existing completed activity and not going to in_progress
+        if (!completed && params.editInProgress !== 'true') {
+          setSelectedStatus('completed');
+          setStep('completed');
         }
       }
     } catch (error) {
@@ -641,8 +659,8 @@ export default function LogActivityModal() {
     }
   };
 
-  const handleStatusSelect = (status: ActivityStatus) => {
-    // Skip conflict screen - go directly to in-progress form
+  const handleStatusSelect = (status: 'completed' | 'in_progress') => {
+    // Skip conflict screen - go directly to form
     // Active watch will be used automatically
     setSelectedStatus(status);
     setStep(status);
@@ -676,17 +694,16 @@ export default function LogActivityModal() {
   };
 
   const handleBack = () => {
-    if (step === 'existing_choice' || step === 'status') {
+    if (step === 'status') {
       router.back();
     } else if (step === 'watch_conflict') {
-      // Return to status or existing_choice
-      setStep(existingCompleted ? 'existing_choice' : 'status');
+      setStep('status');
     } else if (params.editMode === 'true' || params.editInProgress === 'true') {
       // If user came directly to edit form, back should close the modal
       router.back();
     } else {
-      // Return to appropriate initial screen
-      setStep(existingCompleted ? 'existing_choice' : 'status');
+      // Return to status selection
+      setStep('status');
     }
   };
 
@@ -738,6 +755,21 @@ export default function LogActivityModal() {
       }
 
       if (activity) {
+        // Send tag notifications to newly tagged friends
+        const previouslyTagged = new Set(existingCompleted?.tagged_friends || []);
+        const friendsToNotify = taggedFriends.filter(
+          (id) => id !== user.id && !previouslyTagged.has(id)
+        );
+
+        for (const friendId of friendsToNotify) {
+          await createNotification({
+            user_id: friendId,
+            actor_id: user.id,
+            type: 'tagged',
+            activity_id: activity.id,
+          });
+        }
+
         // Invalidate feed cache so updated activity appears immediately
         invalidate('activity_create', user.id);
         // Also directly invalidate the user's specific feed cache key
@@ -901,90 +933,6 @@ export default function LogActivityModal() {
           </View>
         </View>
 
-        {/* Step 0: Existing Choice (for already-ranked titles) */}
-        {step === 'existing_choice' && existingCompleted && (
-          <View style={styles.existingChoiceSection}>
-            {/* Rating Section */}
-            <Text style={styles.stepTitle}>Your Rating</Text>
-            <View style={styles.existingRatingPreview}>
-              <View style={styles.existingStarsRow}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <IconSymbol
-                    key={star}
-                    name={star <= (existingCompleted.star_rating || 0) ? 'star.fill' : 'star'}
-                    size={20}
-                    color={star <= (existingCompleted.star_rating || 0) ? Colors.stamp : Colors.dust}
-                  />
-                ))}
-              </View>
-              {existingCompleted.review_text && (
-                <Text style={styles.existingReviewPreview} numberOfLines={2}>
-                  &quot;{existingCompleted.review_text}&quot;
-                </Text>
-              )}
-            </View>
-
-            {/* Watch Status Section */}
-            <View style={styles.watchStatusSection}>
-              {activeWatch ? (
-                <WatchContextHeader
-                  watchNumber={activeWatch.watch_number}
-                  progress={activeWatchProgress}
-                  progressText={latestProgressText}
-                  contentType={contentType || 'movie'}
-                />
-              ) : (
-                <View style={styles.watchCompleteInfo}>
-                  <IconSymbol name="checkmark.circle.fill" size={16} color={Colors.stamp} />
-                  <Text style={styles.watchCompleteText}>
-                    Watch #{nextWatchNumber - 1 || 1} Complete
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Option 1: Re-rank and edit rating */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.choiceButton,
-                pressed && styles.choiceButtonPressed,
-              ]}
-              onPress={() => {
-                setSelectedStatus('completed');
-                setStep('completed');
-                setSkipRanking(false);  // Will trigger ranking flow
-              }}
-            >
-              <View style={styles.choiceButtonIcon}>
-                <IconSymbol name="arrow.up.arrow.down" size={20} color={Colors.stamp} />
-              </View>
-              <View style={styles.choiceButtonContent}>
-                <Text style={styles.choiceButtonTitle}>Re-rank and edit rating</Text>
-                <Text style={styles.choiceButtonSubtitle}>Change your star rating and re-rank</Text>
-              </View>
-              <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />
-            </Pressable>
-
-            {/* Option 2: Log in-progress */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.choiceButton,
-                pressed && styles.choiceButtonPressed,
-              ]}
-              onPress={() => handleStatusSelect('in_progress')}
-            >
-              <View style={styles.choiceButtonIcon}>
-                <IconSymbol name="play.circle" size={20} color={Colors.textMuted} />
-              </View>
-              <View style={styles.choiceButtonContent}>
-                <Text style={styles.choiceButtonTitle}>Log in-progress activity</Text>
-                <Text style={styles.choiceButtonSubtitle}>Track your current viewing</Text>
-              </View>
-              <IconSymbol name="chevron.right" size={20} color={Colors.textMuted} />
-            </Pressable>
-          </View>
-        )}
-
         {/* Watch Conflict Step (replaces modal) */}
         {step === 'watch_conflict' && activeWatch && (
           <View style={styles.watchConflictSection}>
@@ -1143,18 +1091,37 @@ export default function LogActivityModal() {
 
             {/* Watch Date */}
             <View style={styles.watchDateSection}>
-              <Text style={styles.sectionLabel}>WATCH DATE</Text>
+              <Text style={styles.sectionLabel}>WATCH DATE (OPTIONAL)</Text>
               <View style={styles.datePickerRow}>
-                <DateTimePicker
-                  value={watchDate}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'compact' : 'default'}
-                  maximumDate={new Date()}
-                  onChange={(event, date) => {
-                    if (date) setWatchDate(date);
-                  }}
-                  themeVariant="light"
-                />
+                {watchDate ? (
+                  <>
+                    <DateTimePicker
+                      value={watchDate}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'compact' : 'default'}
+                      maximumDate={new Date()}
+                      onChange={(event, date) => {
+                        if (date) setWatchDate(date);
+                      }}
+                      themeVariant="light"
+                    />
+                    <Pressable
+                      onPress={() => setWatchDate(null)}
+                      style={styles.clearDateButton}
+                      hitSlop={8}
+                    >
+                      <IconSymbol name="xmark" size={16} color={Colors.textMuted} />
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable
+                    onPress={() => setWatchDate(new Date())}
+                    style={styles.addDateButton}
+                  >
+                    <IconSymbol name="plus" size={14} color={Colors.stamp} />
+                    <Text style={styles.addDateText}>Add date</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
 
@@ -1175,6 +1142,12 @@ export default function LogActivityModal() {
                 <Text style={styles.sectionLabel}>WATCHED WITH</Text>
                 <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
               </Pressable>
+              {taggedFriends.length > 0 && (
+                <SelectedFriendsDisplay
+                  selectedIds={taggedFriends}
+                  onRemove={(id) => setTaggedFriends((prev) => prev.filter((f) => f !== id))}
+                />
+              )}
               {user && (
                 <SuggestedFriendPills
                   userId={user.id}
@@ -1321,18 +1294,37 @@ export default function LogActivityModal() {
 
             {/* Watch Date */}
             <View style={styles.watchDateSection}>
-              <Text style={styles.sectionLabel}>WATCH DATE</Text>
+              <Text style={styles.sectionLabel}>WATCH DATE (OPTIONAL)</Text>
               <View style={styles.datePickerRow}>
-                <DateTimePicker
-                  value={watchDate}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'compact' : 'default'}
-                  maximumDate={new Date()}
-                  onChange={(event, date) => {
-                    if (date) setWatchDate(date);
-                  }}
-                  themeVariant="light"
-                />
+                {watchDate ? (
+                  <>
+                    <DateTimePicker
+                      value={watchDate}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'compact' : 'default'}
+                      maximumDate={new Date()}
+                      onChange={(event, date) => {
+                        if (date) setWatchDate(date);
+                      }}
+                      themeVariant="light"
+                    />
+                    <Pressable
+                      onPress={() => setWatchDate(null)}
+                      style={styles.clearDateButton}
+                      hitSlop={8}
+                    >
+                      <IconSymbol name="xmark" size={16} color={Colors.textMuted} />
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable
+                    onPress={() => setWatchDate(new Date())}
+                    style={styles.addDateButton}
+                  >
+                    <IconSymbol name="plus" size={14} color={Colors.stamp} />
+                    <Text style={styles.addDateText}>Add date</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
 
@@ -1353,6 +1345,12 @@ export default function LogActivityModal() {
                 <Text style={styles.sectionLabel}>WATCHING WITH</Text>
                 <IconSymbol name="chevron.right" size={16} color={Colors.textMuted} />
               </Pressable>
+              {taggedFriends.length > 0 && (
+                <SelectedFriendsDisplay
+                  selectedIds={taggedFriends}
+                  onRemove={(id) => setTaggedFriends((prev) => prev.filter((f) => f !== id))}
+                />
+              )}
               {user && (
                 <SuggestedFriendPills
                   userId={user.id}
@@ -1518,44 +1516,6 @@ const styles = StyleSheet.create({
   statusSelection: {
     gap: Spacing.md,
   },
-  existingChoiceSection: {
-    gap: Spacing.md,
-  },
-  existingRatingPreview: {
-    backgroundColor: Colors.cardBackground,
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  existingStarsRow: {
-    flexDirection: 'row',
-    gap: Spacing.xs,
-  },
-  existingReviewPreview: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-    marginTop: Spacing.sm,
-    textAlign: 'center',
-  },
-  watchStatusSection: {
-    marginBottom: Spacing.md,
-  },
-  watchCompleteInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.cardBackground,
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.md,
-  },
-  watchCompleteText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.md,
-    color: Colors.stamp,
-  },
   watchConflictSection: {
     gap: Spacing.lg,
   },
@@ -1614,37 +1574,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.stamp,
     textAlign: 'center',
-  },
-  choiceButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    backgroundColor: Colors.cardBackground,
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.md,
-  },
-  choiceButtonPressed: {
-    opacity: 0.8,
-  },
-  choiceButtonIcon: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  choiceButtonContent: {
-    flex: 1,
-  },
-  choiceButtonTitle: {
-    fontFamily: Fonts.sansSemiBold,
-    fontSize: FontSizes.md,
-    color: Colors.text,
-    marginBottom: 2,
-  },
-  choiceButtonSubtitle: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.textMuted,
   },
   stepTitle: {
     fontFamily: Fonts.serifSemiBold,
@@ -1744,6 +1673,21 @@ const styles = StyleSheet.create({
   datePickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  clearDateButton: {
+    padding: Spacing.sm,
+    marginLeft: Spacing.xs,
+  },
+  addDateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+  },
+  addDateText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.stamp,
   },
   watchedWithSection: {},
   sectionHeader: {

@@ -66,20 +66,37 @@ export interface RankingState {
 // ============================================
 // These define the natural score ranges for each star rating.
 // Scores are NOT forced to normalize - they reflect the star rating.
+// Supports half-star ratings (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5)
 
-const STAR_SCORE_BANDS = {
-  5: { min: 9.5, max: 10.0, default: 9.75 },
-  4: { min: 8.0, max: 9.4, default: 8.7 },
-  3: { min: 6.0, max: 7.9, default: 7.0 },
-  2: { min: 4.0, max: 5.9, default: 5.0 },
-  1: { min: 1.0, max: 3.9, default: 2.5 },
-} as const;
+const STAR_SCORE_BANDS: Record<number, { min: number; max: number; default: number }> = {
+  // Whole-star tiers (unchanged from original)
+  5:   { min: 9.5, max: 10.0, default: 9.75 },
+  4:   { min: 8.0, max: 9.4, default: 8.7 },
+  3:   { min: 6.0, max: 7.9, default: 7.0 },
+  2:   { min: 4.0, max: 5.9, default: 5.0 },
+  1:   { min: 1.0, max: 3.9, default: 2.5 },
+  // Half-star tiers (inserted between whole stars)
+  4.5: { min: 9.2, max: 9.49, default: 9.35 },
+  3.5: { min: 7.5, max: 7.99, default: 7.75 },
+  2.5: { min: 5.5, max: 5.99, default: 5.75 },
+  1.5: { min: 3.5, max: 3.99, default: 3.75 },
+};
+
+// Ordered tier list for iteration (highest to lowest)
+const ORDERED_TIERS = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
 
 /**
- * Get the score band boundaries for a star rating
+ * Get the score band boundaries for a star rating.
+ * Supports both whole-star (1-5) and half-star (1.5, 2.5, etc.) ratings.
  */
 function getScoreBandForStar(starRating: number): { min: number; max: number; default: number } {
-  return STAR_SCORE_BANDS[starRating as keyof typeof STAR_SCORE_BANDS] ?? STAR_SCORE_BANDS[3];
+  // Look up the exact tier (works for both whole and half stars)
+  const band = STAR_SCORE_BANDS[starRating];
+  if (band) return band;
+
+  // Fallback: find the closest valid tier at or below the rating
+  const closestTier = ORDERED_TIERS.find(t => t <= starRating) ?? 3;
+  return STAR_SCORE_BANDS[closestTier];
 }
 
 /**
@@ -90,14 +107,19 @@ function getDefaultScoreForStar(starRating: number): number {
 }
 
 /**
- * Determine the minimum star rating that matches a given score
- * Used for auto-promotion when reordering
+ * Determine the minimum star rating that matches a given score.
+ * Used for auto-promotion when reordering.
+ * Supports half-star tiers.
  */
 function getMinStarForScore(score: number): number {
   if (score >= 9.5) return 5;
+  if (score >= 9.2) return 4.5;
   if (score >= 8.0) return 4;
+  if (score >= 7.5) return 3.5;
   if (score >= 6.0) return 3;
+  if (score >= 5.5) return 2.5;
   if (score >= 4.0) return 2;
+  if (score >= 3.5) return 1.5;
   return 1;
 }
 
@@ -812,9 +834,12 @@ export async function reorderRankings(
       .filter((i): i is typeof i & { star_rating: number } => i.star_rating !== null);
     if (itemsBelow.length > 0) {
       const highestStarBelow = Math.max(...itemsBelow.map(i => i.star_rating));
-      // If we're significantly misaligned (more than 1 star difference), demote
+      // If we're significantly misaligned (more than 1 full star difference), demote
+      // Using 1.0 threshold allows half-star flexibility within adjacent tiers
       if (movedItem.star_rating > highestStarBelow + 1) {
-        newStarRating = highestStarBelow + 1;
+        // Find the next tier above the highest below using ORDERED_TIERS
+        const targetTier = ORDERED_TIERS.find(t => t > highestStarBelow) ?? highestStarBelow;
+        newStarRating = targetTier;
       }
     }
   }

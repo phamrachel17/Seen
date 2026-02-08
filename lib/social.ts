@@ -106,7 +106,8 @@ export async function toggleLike(
 export async function addComment(
   userId: string,
   reviewId: string,
-  content: string
+  content: string,
+  parentId?: string
 ): Promise<Comment | null> {
   const { data, error } = await supabase
     .from('comments')
@@ -114,6 +115,7 @@ export async function addComment(
       user_id: userId,
       review_id: reviewId,
       content: content.trim(),
+      parent_id: parentId || null,
     })
     .select(`
       *,
@@ -207,11 +209,21 @@ export async function getReviewCommentsWithLikes(
   }
 
   // Merge like data into comments
-  return commentsData.map(comment => ({
+  const commentsWithLikes = commentsData.map(comment => ({
     ...comment,
     like_count: likeCountMap.get(comment.id) || 0,
     liked_by_user: userLikedSet.has(comment.id),
   })) as Comment[];
+
+  // Organize into threads: top-level comments with nested replies
+  const topLevelComments = commentsWithLikes.filter(c => !c.parent_id);
+  const replies = commentsWithLikes.filter(c => c.parent_id);
+
+  // Attach replies to their parent comments
+  return topLevelComments.map(comment => ({
+    ...comment,
+    replies: replies.filter(r => r.parent_id === comment.id),
+  }));
 }
 
 export async function getCommentCount(reviewId: string): Promise<number> {
@@ -553,7 +565,8 @@ export async function getActivityComments(activityId: string): Promise<Comment[]
 export async function addActivityComment(
   userId: string,
   activityId: string,
-  content: string
+  content: string,
+  parentId?: string
 ): Promise<Comment | null> {
   const { data, error } = await supabase
     .from('comments')
@@ -561,6 +574,7 @@ export async function addActivityComment(
       user_id: userId,
       review_id: activityId,
       content: content.trim(),
+      parent_id: parentId || null,
     })
     .select(`
       *,
@@ -679,11 +693,21 @@ export async function getActivityCommentsWithLikes(
   }
 
   // Merge like data into comments
-  return commentsData.map(comment => ({
+  const commentsWithLikes = commentsData.map(comment => ({
     ...comment,
     like_count: likeCountMap.get(comment.id) || 0,
     liked_by_user: userLikedSet.has(comment.id),
   })) as Comment[];
+
+  // Organize into threads: top-level comments with nested replies
+  const topLevelComments = commentsWithLikes.filter(c => !c.parent_id);
+  const replies = commentsWithLikes.filter(c => c.parent_id);
+
+  // Attach replies to their parent comments
+  return topLevelComments.map(comment => ({
+    ...comment,
+    replies: replies.filter(r => r.parent_id === comment.id),
+  }));
 }
 
 // ============ FRIENDS' REVIEWS ============

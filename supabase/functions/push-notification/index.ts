@@ -8,7 +8,7 @@ interface NotificationRecord {
   id: string;
   user_id: string;
   actor_id: string;
-  type: 'like' | 'comment' | 'tagged' | 'follow';
+  type: 'like' | 'comment' | 'tagged' | 'follow' | 'reply';
   review_id?: string;
   comment_id?: string;
   created_at: string;
@@ -165,6 +165,13 @@ function buildNotificationMessage(
         title: 'New Follower',
         body: `${actorName} started following you`,
       };
+    case 'reply':
+      return {
+        title: 'New Reply',
+        body: contentTitle
+          ? `${actorName} replied to your comment on ${contentTitle}`
+          : `${actorName} replied to your comment`,
+      };
     default:
       return {
         title: 'Seen',
@@ -182,6 +189,7 @@ function buildNavigationData(
     case 'like':
     case 'comment':
     case 'tagged':
+    case 'reply':
       return {
         type: notification.type,
         targetId: tmdbId,

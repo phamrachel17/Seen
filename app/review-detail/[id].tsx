@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { StarDisplay } from '@/components/ui/star-display';
 import { ProfileAvatar } from '@/components/profile-avatar';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import {
@@ -42,6 +43,7 @@ export default function ReviewDetailScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const scrollViewRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
 
   const [review, setReview] = useState<ReviewWithDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,6 +53,7 @@ export default function ReviewDetailScreen() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
 
   const isOwnReview = user?.id === review?.user_id;
 
@@ -131,22 +134,45 @@ export default function ReviewDetailScreen() {
 
     setIsSubmitting(true);
 
-    const newComment = await addComment(user.id, review.id, commentText);
+    const newComment = await addComment(user.id, review.id, commentText, replyTo?.id);
 
     if (newComment) {
-      setComments((prev) => [...prev, newComment]);
-      setCommentText('');
-
-      // Send notification
-      if (review.user_id !== user.id) {
-        await createNotification({
-          user_id: review.user_id,
-          actor_id: user.id,
-          type: 'comment',
-          review_id: review.id,
-          comment_id: newComment.id,
-        });
+      if (replyTo) {
+        // Add reply to parent comment's replies array
+        setComments((prev) =>
+          prev.map((c) =>
+            c.id === replyTo.id
+              ? { ...c, replies: [...(c.replies || []), newComment] }
+              : c
+          )
+        );
+        // Notify the comment author (not review author)
+        if (replyTo.user_id !== user.id) {
+          await createNotification({
+            user_id: replyTo.user_id,
+            actor_id: user.id,
+            type: 'reply',
+            review_id: review.id,
+            comment_id: newComment.id,
+          });
+        }
+      } else {
+        // Top-level comment
+        setComments((prev) => [...prev, { ...newComment, replies: [] }]);
+        // Notify review author
+        if (review.user_id !== user.id) {
+          await createNotification({
+            user_id: review.user_id,
+            actor_id: user.id,
+            type: 'comment',
+            review_id: review.id,
+            comment_id: newComment.id,
+          });
+        }
       }
+
+      setCommentText('');
+      setReplyTo(null);
 
       // Scroll to bottom to show new comment
       setTimeout(() => {
@@ -157,10 +183,34 @@ export default function ReviewDetailScreen() {
     setIsSubmitting(false);
   };
 
-  const handleDeleteComment = async (commentId: string) => {
+  const handleReplyPress = (comment: Comment) => {
+    setReplyTo(comment);
+    const username = comment.user?.username || '';
+    setCommentText(`@${username} `);
+    inputRef.current?.focus();
+  };
+
+  const handleCancelReply = () => {
+    setReplyTo(null);
+    setCommentText('');
+  };
+
+  const handleDeleteComment = async (commentId: string, parentId?: string | null) => {
     const success = await deleteComment(commentId);
     if (success) {
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      if (parentId) {
+        // Remove reply from parent's replies array
+        setComments((prev) =>
+          prev.map((c) =>
+            c.id === parentId
+              ? { ...c, replies: (c.replies || []).filter((r) => r.id !== commentId) }
+              : c
+          )
+        );
+      } else {
+        // Remove top-level comment (cascade will handle replies in DB)
+        setComments((prev) => prev.filter((c) => c.id !== commentId));
+      }
     }
   };
 
@@ -242,18 +292,7 @@ export default function ReviewDetailScreen() {
   };
 
   const renderStars = (rating: number) => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <IconSymbol
-            key={star}
-            name={star <= rating ? 'star.fill' : 'star'}
-            size={18}
-            color={star <= rating ? Colors.starFilled : Colors.starEmpty}
-          />
-        ))}
-      </View>
-    );
+    return <StarDisplay rating={rating} size={18} />;
   };
 
   if (isLoading) {
@@ -390,60 +429,144 @@ export default function ReviewDetailScreen() {
           ) : (
             <View style={styles.commentsList}>
               {comments.map((comment) => (
-                <View key={comment.id} style={styles.commentItemWrapper}>
-                  <View style={styles.commentItem}>
-                    <Pressable onPress={() => handleUserPress(comment.user_id)}>
-                      <ProfileAvatar
-                        imageUrl={comment.user?.profile_image_url}
-                        username={comment.user?.username || '?'}
-                        size="tiny"
-                        variant="circle"
-                      />
-                    </Pressable>
-                    <View style={styles.commentContent}>
-                      <View style={styles.commentHeader}>
-                        <Pressable onPress={() => handleUserPress(comment.user_id)}>
-                          <Text style={styles.commentAuthor}>
-                            {comment.user?.display_name || comment.user?.username}
+                <View key={comment.id}>
+                  {/* Parent Comment */}
+                  <View style={styles.commentItemWrapper}>
+                    <View style={styles.commentItem}>
+                      <Pressable onPress={() => handleUserPress(comment.user_id)}>
+                        <ProfileAvatar
+                          imageUrl={comment.user?.profile_image_url}
+                          username={comment.user?.username || '?'}
+                          size="tiny"
+                          variant="circle"
+                        />
+                      </Pressable>
+                      <View style={styles.commentContent}>
+                        <View style={styles.commentHeader}>
+                          <Pressable onPress={() => handleUserPress(comment.user_id)}>
+                            <Text style={styles.commentAuthor}>
+                              {comment.user?.display_name || comment.user?.username}
+                            </Text>
+                          </Pressable>
+                          <Text style={styles.commentTime}>
+                            {formatCommentTime(comment.created_at)}
                           </Text>
-                        </Pressable>
-                        <Text style={styles.commentTime}>
-                          {formatCommentTime(comment.created_at)}
-                        </Text>
+                        </View>
+                        <Text style={styles.commentText}>{comment.content}</Text>
                       </View>
-                      <Text style={styles.commentText}>{comment.content}</Text>
-                    </View>
-                    {comment.user_id === user?.id && (
                       <Pressable
-                        style={styles.deleteButton}
-                        onPress={() => handleDeleteComment(comment.id)}
+                        style={styles.commentLikeButton}
+                        onPress={() => handleCommentLike(comment)}
                         hitSlop={8}
                       >
-                        <IconSymbol name="trash" size={14} color={Colors.textMuted} />
+                        <IconSymbol
+                          name={comment.liked_by_user ? 'heart.fill' : 'heart'}
+                          size={16}
+                          color={comment.liked_by_user ? Colors.stamp : Colors.textMuted}
+                        />
+                        {(comment.like_count || 0) > 0 && (
+                          <Text
+                            style={[
+                              styles.commentLikeCount,
+                              comment.liked_by_user && styles.commentLikeCountActive,
+                            ]}
+                          >
+                            {comment.like_count}
+                          </Text>
+                        )}
                       </Pressable>
-                    )}
-                  </View>
-                  <Pressable
-                    style={styles.commentLikeButton}
-                    onPress={() => handleCommentLike(comment)}
-                    hitSlop={8}
-                  >
-                    <IconSymbol
-                      name={comment.liked_by_user ? 'heart.fill' : 'heart'}
-                      size={14}
-                      color={comment.liked_by_user ? Colors.stamp : Colors.textMuted}
-                    />
-                    {(comment.like_count || 0) > 0 && (
-                      <Text
-                        style={[
-                          styles.commentLikeCount,
-                          comment.liked_by_user && styles.commentLikeCountActive,
-                        ]}
+                      {comment.user_id === user?.id && (
+                        <Pressable
+                          style={styles.deleteButton}
+                          onPress={() => handleDeleteComment(comment.id)}
+                          hitSlop={8}
+                        >
+                          <IconSymbol name="trash" size={14} color={Colors.textMuted} />
+                        </Pressable>
+                      )}
+                    </View>
+                    <View style={styles.commentActions}>
+                      <Pressable
+                        style={styles.replyButton}
+                        onPress={() => handleReplyPress(comment)}
+                        hitSlop={8}
                       >
-                        {comment.like_count}
-                      </Text>
-                    )}
-                  </Pressable>
+                        <Text style={styles.replyButtonText}>Reply</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Replies */}
+                  {comment.replies && comment.replies.length > 0 && (
+                    <View style={styles.repliesContainer}>
+                      {comment.replies.map((reply) => (
+                        <View key={reply.id} style={styles.replyItemWrapper}>
+                          <View style={styles.commentItem}>
+                            <Pressable onPress={() => handleUserPress(reply.user_id)}>
+                              <ProfileAvatar
+                                imageUrl={reply.user?.profile_image_url}
+                                username={reply.user?.username || '?'}
+                                size="tiny"
+                                variant="circle"
+                              />
+                            </Pressable>
+                            <View style={styles.commentContent}>
+                              <View style={styles.commentHeader}>
+                                <Pressable onPress={() => handleUserPress(reply.user_id)}>
+                                  <Text style={styles.commentAuthor}>
+                                    {reply.user?.display_name || reply.user?.username}
+                                  </Text>
+                                </Pressable>
+                                <Text style={styles.commentTime}>
+                                  {formatCommentTime(reply.created_at)}
+                                </Text>
+                              </View>
+                              <Text style={styles.commentText}>{reply.content}</Text>
+                            </View>
+                            <Pressable
+                              style={styles.commentLikeButton}
+                              onPress={() => handleCommentLike(reply)}
+                              hitSlop={8}
+                            >
+                              <IconSymbol
+                                name={reply.liked_by_user ? 'heart.fill' : 'heart'}
+                                size={16}
+                                color={reply.liked_by_user ? Colors.stamp : Colors.textMuted}
+                              />
+                              {(reply.like_count || 0) > 0 && (
+                                <Text
+                                  style={[
+                                    styles.commentLikeCount,
+                                    reply.liked_by_user && styles.commentLikeCountActive,
+                                  ]}
+                                >
+                                  {reply.like_count}
+                                </Text>
+                              )}
+                            </Pressable>
+                            {reply.user_id === user?.id && (
+                              <Pressable
+                                style={styles.deleteButton}
+                                onPress={() => handleDeleteComment(reply.id, comment.id)}
+                                hitSlop={8}
+                              >
+                                <IconSymbol name="trash" size={14} color={Colors.textMuted} />
+                              </Pressable>
+                            )}
+                          </View>
+                          <View style={styles.commentActions}>
+                            <Pressable
+                              style={styles.replyButton}
+                              onPress={() => handleReplyPress(comment)}
+                              hitSlop={8}
+                            >
+                              <Text style={styles.replyButtonText}>Reply</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               ))}
             </View>
@@ -452,40 +575,53 @@ export default function ReviewDetailScreen() {
       </ScrollView>
 
       {/* Comment Input */}
-      <View style={[styles.commentInputContainer, { paddingBottom: insets.bottom + Spacing.sm }]}>
-        <ProfileAvatar
-          imageUrl={undefined}
-          username={user?.user_metadata?.username || '?'}
-          size="tiny"
-          variant="circle"
-        />
-        <TextInput
-          style={styles.commentInput}
-          value={commentText}
-          onChangeText={setCommentText}
-          placeholder="Add a comment..."
-          placeholderTextColor={Colors.textMuted}
-          multiline
-          maxLength={500}
-        />
-        <Pressable
-          style={[
-            styles.sendButton,
-            (!commentText.trim() || isSubmitting) && styles.sendButtonDisabled,
-          ]}
-          onPress={handleSubmitComment}
-          disabled={!commentText.trim() || isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color={Colors.stamp} />
-          ) : (
-            <IconSymbol
-              name="arrow.up.circle.fill"
-              size={28}
-              color={commentText.trim() ? Colors.stamp : Colors.textMuted}
-            />
-          )}
-        </Pressable>
+      <View style={[styles.commentInputWrapper, { paddingBottom: insets.bottom + Spacing.sm }]}>
+        {replyTo && (
+          <View style={styles.replyingToBar}>
+            <Text style={styles.replyingToText}>
+              Replying to @{replyTo.user?.username}
+            </Text>
+            <Pressable onPress={handleCancelReply} hitSlop={8}>
+              <IconSymbol name="xmark" size={16} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+        <View style={styles.commentInputContainer}>
+          <ProfileAvatar
+            imageUrl={undefined}
+            username={user?.user_metadata?.username || '?'}
+            size="tiny"
+            variant="circle"
+          />
+          <TextInput
+            ref={inputRef}
+            style={styles.commentInput}
+            value={commentText}
+            onChangeText={setCommentText}
+            placeholder={replyTo ? `Reply to @${replyTo.user?.username}...` : 'Add a comment...'}
+            placeholderTextColor={Colors.textMuted}
+            multiline
+            maxLength={500}
+          />
+          <Pressable
+            style={[
+              styles.sendButton,
+              (!commentText.trim() || isSubmitting) && styles.sendButtonDisabled,
+            ]}
+            onPress={handleSubmitComment}
+            disabled={!commentText.trim() || isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color={Colors.stamp} />
+            ) : (
+              <IconSymbol
+                name="arrow.up.circle.fill"
+                size={28}
+                color={commentText.trim() ? Colors.stamp : Colors.textMuted}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -659,10 +795,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xl,
   },
   commentsList: {
-    gap: Spacing.lg,
+    gap: Spacing.md,
   },
   commentItemWrapper: {
-    gap: Spacing.xs,
+    gap: 2,
   },
   commentItem: {
     flexDirection: 'row',
@@ -672,7 +808,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.cardBackground,
     borderRadius: BorderRadius.md,
-    padding: Spacing.md,
+    padding: Spacing.sm,
   },
   commentHeader: {
     flexDirection: 'row',
@@ -694,14 +830,14 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.sm,
     color: Colors.textSecondary,
-    lineHeight: FontSizes.sm * 1.5,
+    lineHeight: FontSizes.sm * 1.3,
   },
   commentLikeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingVertical: Spacing.xs,
-    marginLeft: 40, // Align with comment content (avatar width + gap)
+    paddingHorizontal: Spacing.xs,
   },
   commentLikeCount: {
     fontFamily: Fonts.sans,
@@ -715,14 +851,55 @@ const styles = StyleSheet.create({
     padding: Spacing.xs,
     alignSelf: 'flex-start',
   },
+  commentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginLeft: 40, // Align with comment content (avatar width + gap)
+  },
+  replyButton: {
+    paddingVertical: 2,
+  },
+  replyButtonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+  },
+  repliesContainer: {
+    marginLeft: Spacing.lg,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.border,
+    paddingLeft: Spacing.sm,
+    marginTop: Spacing.xs,
+    gap: Spacing.sm,
+  },
+  replyItemWrapper: {
+    gap: 2,
+  },
+  commentInputWrapper: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  replyingToBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.cardBackground,
+  },
+  replyingToText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
   commentInputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
     backgroundColor: Colors.background,
   },
   commentInput: {
