@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { Image } from 'expo-image';
+import { Video, ResizeMode } from 'expo-av';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
@@ -18,10 +18,13 @@ export default function LandingScreen() {
 
       {/* Illustration */}
       <View style={styles.illustrationContainer}>
-        <Image
-          source={require('@/assets/images/manAndTv.jpg')}
+        <Video
+          source={require('@/assets/video/tv_ambient_flicker.mp4')}
           style={styles.illustration}
-          contentFit="contain"
+          resizeMode={ResizeMode.CONTAIN}
+          shouldPlay
+          isLooping
+          isMuted
         />
       </View>
 

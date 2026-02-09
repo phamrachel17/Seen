@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 
 interface LoadingScreenProps {
@@ -8,7 +9,14 @@ interface LoadingScreenProps {
 export function LoadingScreen({ message }: LoadingScreenProps) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Seen</Text>
+      <Video
+        source={require('@/assets/video/tv_ambient_flicker.mp4')}
+        style={styles.video}
+        resizeMode={ResizeMode.CONTAIN}
+        shouldPlay
+        isLooping
+        isMuted
+      />
       {message && <Text style={styles.message}>{message}</Text>}
     </View>
   );
@@ -22,10 +30,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xl,
   },
-  title: {
-    fontFamily: Fonts.serifSemiBold,
-    fontSize: FontSizes['3xl'],
-    color: Colors.stamp,
+  video: {
+    width: 200,
+    height: 200,
   },
   message: {
     fontFamily: Fonts.sans,
