@@ -39,7 +39,7 @@ export function UpdatePromptModal({
 
           <Text style={styles.message}>
             {updateMessage ||
-              `There's a new version of Seen! I've squashed bugs and made things even better. Update now so you don't miss out on the good stuff.`}
+              `There's a new version of Seen! I've been busy squashing bugs and implementing your feedback 🐛.\nUpdate now for a smoother, better experience.`}
           </Text>
 
           <View style={styles.buttonContainer}>
