@@ -193,11 +193,26 @@ async function ensureScoreMonotonicity(
     }
   }
 
-  // Batch update all fixes
-  for (const update of updates) {
-    await supabase.from('rankings')
-      .update({ display_score: update.display_score })
-      .eq('id', update.id);
+  // Batch update all fixes in a single RPC call
+  if (updates.length > 0) {
+    const batchPayload = updates.map(u => {
+      const ranking = sorted.find(r => r.ranking.id === u.id)!;
+      return {
+        id: u.id,
+        rank_position: ranking.ranking.rank_position,
+        display_score: u.display_score,
+      };
+    });
+
+    const { error } = await supabase.rpc('reorder_rankings_batch', {
+      p_user_id: userId,
+      p_content_type: contentType,
+      p_rankings: batchPayload,
+    });
+
+    if (error) {
+      console.error('Error batch fixing score monotonicity:', error);
+    }
   }
 }
 
@@ -299,40 +314,8 @@ export async function getUserRankingsWithRatings(
     return [];
   }
 
-  // If empty, try once more after a short delay (network race condition workaround)
   if (!rankingsData || rankingsData.length === 0) {
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    const { data: retryData, error: retryError } = await supabase
-      .from('rankings')
-      .select(`
-        id, user_id, movie_id, content_type, rank_position, display_score, created_at, updated_at,
-        movies (id, title, poster_url, backdrop_url, release_year, genres, director, synopsis, runtime_minutes, popularity_score, collection_id, collection_name)
-      `)
-      .eq('user_id', userId)
-      .eq('content_type', contentType)
-      .order('rank_position', { ascending: true });
-
-    if (retryError || !retryData || retryData.length === 0) {
-      return [];
-    }
-
-    // Use retry data instead
-    const rawRetryData = retryData as RankingRowRaw[];
-    const typedRetryData: RankingRow[] = rawRetryData.map((r) => ({
-      id: r.id,
-      user_id: r.user_id,
-      movie_id: r.movie_id,
-      content_type: r.content_type,
-      rank_position: r.rank_position,
-      display_score: r.display_score,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      movie: r.movies ?? null,  // FK returns single object, not array
-    }));
-
-    // Continue with retry data
-    return processRankingsData(typedRetryData, userId);
+    return [];
   }
 
   // Cast and normalize the raw data (Supabase returns FK as single object)
@@ -382,23 +365,24 @@ async function processRankingsData(
     .filter((id): id is number => id !== undefined);
 
   // Fetch completed activities with star ratings using content IDs
-  const { data: activitiesData, error: activitiesError } = await supabase
-    .from('activity_log')
-    .select('content_id, star_rating')
-    .eq('user_id', userId)
-    .eq('status', 'completed')
-    .in('content_id', contentIds)
-    .not('star_rating', 'is', null);
-
-  if (activitiesError) {
-    console.error('Error fetching activities:', activitiesError);
-  }
-
-  // Create a map of content_id -> star_rating
-  // Use Number() to ensure consistent types (Supabase may return strings)
   const ratingsMap = new Map<number, number>();
-  for (const activity of activitiesData || []) {
-    ratingsMap.set(Number(activity.content_id), Number(activity.star_rating));
+  if (contentIds.length > 0) {
+    const { data: activitiesData, error: activitiesError } = await supabase
+      .from('activity_log')
+      .select('content_id, star_rating')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .in('content_id', contentIds)
+      .not('star_rating', 'is', null);
+
+    if (activitiesError) {
+      console.error('Error fetching activities:', activitiesError);
+    }
+
+    // Use Number() to ensure consistent types (Supabase may return strings)
+    for (const activity of activitiesData || []) {
+      ratingsMap.set(Number(activity.content_id), Number(activity.star_rating));
+    }
   }
 
   // Combine the data - filter out rows without movies and map to RankedMovie
@@ -571,35 +555,35 @@ export async function saveRanking(
   tierMovies: RankedMovie[] = []
 ): Promise<void> {
   try {
-    // Cache the movie with all attributes
-    const { error: movieError } = await supabase.from('movies').upsert({
-      id: movie.id,
-      title: movie.title,
-      poster_url: movie.poster_url,
-      backdrop_url: movie.backdrop_url,
-      release_year: movie.release_year,
-      genres: movie.genres,
-      director: movie.director,
-      synopsis: movie.synopsis,
-      popularity_score: movie.popularity_score,
-      runtime_minutes: movie.runtime_minutes,
-      collection_id: movie.collection_id,
-      collection_name: movie.collection_name,
-      updated_at: new Date().toISOString(),
-    });
+    // Cache the movie and check for existing ranking in parallel
+    const [{ error: movieError }, { data: existingRanking }] = await Promise.all([
+      supabase.from('movies').upsert({
+        id: movie.id,
+        title: movie.title,
+        poster_url: movie.poster_url,
+        backdrop_url: movie.backdrop_url,
+        release_year: movie.release_year,
+        genres: movie.genres,
+        director: movie.director,
+        synopsis: movie.synopsis,
+        popularity_score: movie.popularity_score,
+        runtime_minutes: movie.runtime_minutes,
+        collection_id: movie.collection_id,
+        collection_name: movie.collection_name,
+        updated_at: new Date().toISOString(),
+      }),
+      supabase
+        .from('rankings')
+        .select('id, rank_position')
+        .eq('user_id', userId)
+        .eq('movie_id', movie.id)
+        .eq('content_type', contentType)
+        .single(),
+    ]);
 
     if (movieError) {
       console.error('Error caching movie:', movieError);
     }
-
-    // Check if movie already has a ranking for this content type
-    const { data: existingRanking } = await supabase
-      .from('rankings')
-      .select('id, rank_position')
-      .eq('user_id', userId)
-      .eq('movie_id', movie.id)
-      .eq('content_type', contentType)
-      .single();
 
     if (existingRanking) {
       // Remove existing ranking first so it can be re-ranked
@@ -673,8 +657,16 @@ export async function saveRanking(
       displayScore = tiedMovie.ranking.display_score;
     } else {
       // Normal case - calculate NEIGHBOR-AWARE score
-      // Re-fetch rankings after shifting to get accurate neighbor positions
-      const updatedRankings = await getUserRankingsWithRatings(userId, contentType);
+      // Update local copy to reflect the shift (avoids re-fetching all rankings from DB)
+      const updatedRankings = allRankings.map(r => ({
+        ...r,
+        ranking: {
+          ...r.ranking,
+          rank_position: r.ranking.rank_position >= globalPosition
+            ? r.ranking.rank_position + 1
+            : r.ranking.rank_position,
+        },
+      }));
       displayScore = calculateNeighborAwareScore(globalPosition, updatedRankings, starRating);
     }
 
@@ -692,44 +684,42 @@ export async function saveRanking(
       throw insertError;
     }
 
-    // Fix any score inversions caused by shifting existing rankings
-    await ensureScoreMonotonicity(userId, contentType);
-
-    // Ensure content exists and create completed activity
+    // Fix score inversions and ensure activity exists in parallel (independent operations)
     try {
-      // Ensure content exists in content table and get content ID
-      const content = await ensureContentExists(movie.id, contentType);
+      await Promise.all([
+        ensureScoreMonotonicity(userId, contentType),
+        (async () => {
+          const content = await ensureContentExists(movie.id, contentType);
+          if (!content) {
+            console.error('Failed to ensure content exists for movie:', movie.id);
+            throw new Error(`Content creation failed for TMDB ID ${movie.id}`);
+          }
 
-      if (!content) {
-        console.error('Failed to ensure content exists for movie:', movie.id);
-        throw new Error(`Content creation failed for TMDB ID ${movie.id}`);
-      }
+          const { data: existingActivity } = await supabase
+            .from('activity_log')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('content_id', content.id)
+            .eq('status', 'completed')
+            .single();
 
-      // Check if activity already exists to avoid duplicates
-      const { data: existingActivity } = await supabase
-        .from('activity_log')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('content_id', content.id)
-        .eq('status', 'completed')
-        .single();
+          if (!existingActivity) {
+            const activityResult = await createActivity({
+              userId: userId,
+              tmdbId: movie.id,
+              contentType: contentType,
+              status: 'completed',
+              starRating: starRating,
+              watchDate: new Date(),
+              isPrivate: false,
+            });
 
-      if (!existingActivity) {
-        // Create completed activity with the star rating
-        const activityResult = await createActivity({
-          userId: userId,
-          tmdbId: movie.id,
-          contentType: contentType,
-          status: 'completed',
-          starRating: starRating,
-          watchDate: new Date(),
-          isPrivate: false,
-        });
-
-        if (!activityResult) {
-          throw new Error('createActivity returned null/undefined');
-        }
-      }
+            if (!activityResult) {
+              throw new Error('createActivity returned null/undefined');
+            }
+          }
+        })(),
+      ]);
     } catch (activityError) {
       console.error('Error creating activity for ranking:', activityError);
       // Throw error to surface data consistency issues
@@ -784,17 +774,19 @@ export async function reorderRankings(
 
   const contentIds = rankings.map(r => tmdbToContentMap.get(r.movie_id)).filter(Boolean) as number[];
 
-  const { data: activities } = await supabase
-    .from('activity_log')
-    .select('content_id, star_rating')
-    .eq('user_id', userId)
-    .eq('status', 'completed')
-    .in('content_id', contentIds);
-
   const contentToStarMap = new Map<number, number>();
-  for (const a of activities || []) {
-    if (a.star_rating) {
-      contentToStarMap.set(a.content_id, a.star_rating);
+  if (contentIds.length > 0) {
+    const { data: activities } = await supabase
+      .from('activity_log')
+      .select('content_id, star_rating')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .in('content_id', contentIds);
+
+    for (const a of activities || []) {
+      if (a.star_rating) {
+        contentToStarMap.set(a.content_id, a.star_rating);
+      }
     }
   }
 

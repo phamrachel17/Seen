@@ -297,7 +297,7 @@ export async function getNotifications(
         // Fetch activity to get content_id
         const { data: activity } = await supabase
           .from('activity_log')
-          .select('id, content_id, content:content(id, tmdb_id, title, poster_url, content_type)')
+          .select('id, content_id, status, content:content(id, tmdb_id, title, poster_url, content_type)')
           .eq('id', notification.review_id)
           .single();
 
@@ -307,6 +307,7 @@ export async function getNotifications(
             activity: {
               id: activity.id,
               content_id: activity.content_id,
+              status: activity.status,
               content: activity.content,
             },
           };

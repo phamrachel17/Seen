@@ -68,12 +68,13 @@ Deno.serve(async (req) => {
     let contentTitle = '';
     let contentType = '';
     let tmdbId = '';
+    let activityStatus = '';
 
     if (notification.review_id) {
       // Try activity_log first (new system)
       const { data: activity } = await supabase
         .from('activity_log')
-        .select('content:content(tmdb_id, title, content_type)')
+        .select('status, content:content(tmdb_id, title, content_type)')
         .eq('id', notification.review_id)
         .single();
 
@@ -81,6 +82,7 @@ Deno.serve(async (req) => {
         contentTitle = (activity.content as any).title || '';
         contentType = (activity.content as any).content_type || '';
         tmdbId = String((activity.content as any).tmdb_id || '');
+        activityStatus = activity.status || '';
       }
     }
 
@@ -88,7 +90,8 @@ Deno.serve(async (req) => {
     const { title, body } = buildNotificationMessage(
       notification.type,
       actorName,
-      contentTitle
+      contentTitle,
+      activityStatus
     );
 
     // Build navigation data for deep linking
@@ -133,32 +136,42 @@ Deno.serve(async (req) => {
   }
 });
 
+function getActivityLabel(status: string): string {
+  switch (status) {
+    case 'bookmarked': return 'bookmark';
+    case 'in_progress': return 'activity';
+    default: return 'review';
+  }
+}
+
 function buildNotificationMessage(
   type: string,
   actorName: string,
-  contentTitle: string
+  contentTitle: string,
+  activityStatus: string = ''
 ): { title: string; body: string } {
+  const label = getActivityLabel(activityStatus);
   switch (type) {
     case 'like':
       return {
         title: 'New Like',
         body: contentTitle
-          ? `${actorName} liked your review of ${contentTitle}`
-          : `${actorName} liked your review`,
+          ? `${actorName} liked your ${label} of ${contentTitle}`
+          : `${actorName} liked your ${label}`,
       };
     case 'comment':
       return {
         title: 'New Comment',
         body: contentTitle
-          ? `${actorName} commented on your review of ${contentTitle}`
-          : `${actorName} commented on your review`,
+          ? `${actorName} commented on your ${label} of ${contentTitle}`
+          : `${actorName} commented on your ${label}`,
       };
     case 'tagged':
       return {
         title: 'You were tagged',
         body: contentTitle
-          ? `${actorName} tagged you in a review of ${contentTitle}`
-          : `${actorName} tagged you in a review`,
+          ? `${actorName} tagged you in a ${label} of ${contentTitle}`
+          : `${actorName} tagged you in a ${label}`,
       };
     case 'follow':
       return {

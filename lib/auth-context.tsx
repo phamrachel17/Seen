@@ -55,9 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         // Identify existing user in PostHog
         if (session?.user) {
-          posthog?.identify(session.user.id, {
-            email: session.user.email,
-          });
+          posthog?.identify(session.user.id);
         }
       }
       setLoading(false);
@@ -71,9 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Setup push notifications and identify user in PostHog when they sign in
       if (event === 'SIGNED_IN' && session?.user) {
         setupPushNotifications(session.user.id);
-        posthog?.identify(session.user.id, {
-          email: session.user.email,
-        });
+        posthog?.identify(session.user.id);
       }
     });
 

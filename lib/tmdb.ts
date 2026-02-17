@@ -1,4 +1,4 @@
-import { Movie, MovieDetails, CastMember, CrewMember, TVShow, TVShowDetails, Season, Episode, Person } from '@/types';
+import { Movie, MovieDetails, CastMember, CrewMember, TVShow, TVShowDetails, Season, Episode, Person, PersonDetails } from '@/types';
 
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY ?? '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
@@ -271,7 +271,7 @@ export async function searchMovies(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBSearchResponse>('/search/movie', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'false',
+    include_adult: 'true',
   });
 
   return {
@@ -442,7 +442,7 @@ export async function searchTVShows(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBTVSearchResponse>('/search/tv', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'false',
+    include_adult: 'true',
   });
 
   return {
@@ -579,7 +579,7 @@ export async function searchAll(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBMultiSearchResult>('/search/multi', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'false',
+    include_adult: 'true',
   });
 
   const results = data.results
@@ -636,6 +636,34 @@ export async function discoverMoviesByGenres(genreIds: number[], page: number = 
     sort_by: 'popularity.desc',
     page: page.toString(),
     include_adult: 'false',
+  });
+
+  return data.results.map((m) => transformMovie(m));
+}
+
+// Discover anime TV shows (Animation genre + Japan origin)
+export async function discoverAnimeTVShows(page: number = 1): Promise<TVShow[]> {
+  const data = await tmdbFetch<TMDBTVSearchResponse>('/discover/tv', {
+    with_genres: GENRE_IDS.animation.toString(),
+    with_origin_country: 'JP',
+    sort_by: 'popularity.desc',
+    page: page.toString(),
+    include_adult: 'false',
+    'vote_count.gte': '100',
+  });
+
+  return data.results.map((s) => transformTVShow(s));
+}
+
+// Discover anime movies (Animation genre + Japan origin)
+export async function discoverAnimeMovies(page: number = 1): Promise<Movie[]> {
+  const data = await tmdbFetch<TMDBSearchResponse>('/discover/movie', {
+    with_genres: GENRE_IDS.animation.toString(),
+    with_origin_country: 'JP',
+    sort_by: 'popularity.desc',
+    page: page.toString(),
+    include_adult: 'false',
+    'vote_count.gte': '100',
   });
 
   return data.results.map((m) => transformMovie(m));
@@ -742,6 +770,34 @@ export async function getMovieVideos(movieId: number): Promise<{
   }
 }
 
+// Get TV show videos (trailers, teasers) - returns YouTube keys
+export async function getTVShowVideos(showId: number): Promise<{
+  trailerKey: string | null;
+  teaserKey: string | null;
+}> {
+  try {
+    const data = await tmdbFetch<TMDBVideosResponse>(`/tv/${showId}/videos`);
+
+    const officialTrailer = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Trailer' && v.official
+    );
+    const anyTrailer = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Trailer'
+    );
+    const teaser = data.results.find(
+      (v) => v.site === 'YouTube' && v.type === 'Teaser'
+    );
+
+    return {
+      trailerKey: officialTrailer?.key || anyTrailer?.key || null,
+      teaserKey: teaser?.key || null,
+    };
+  } catch (error) {
+    console.error('Error fetching TV show videos:', error);
+    return { trailerKey: null, teaserKey: null };
+  }
+}
+
 // Get person's movie credits (as actor or director)
 export async function getPersonMovieCredits(personId: number): Promise<Movie[]> {
   const data = await tmdbFetch<TMDBPersonCredits>(`/person/${personId}/movie_credits`);
@@ -768,6 +824,77 @@ export async function getPersonMovieCredits(personId: number): Promise<Movie[]> 
     .slice(0, 20);
 
   return movies.map((m) => transformMovie(m));
+}
+
+// Get person details (biography, birth info, etc.)
+interface TMDBPersonDetails {
+  id: number;
+  name: string;
+  biography: string;
+  birthday: string | null;
+  deathday: string | null;
+  place_of_birth: string | null;
+  profile_path: string | null;
+  known_for_department: string;
+}
+
+export async function getPersonDetails(personId: number): Promise<PersonDetails> {
+  const data = await tmdbFetch<TMDBPersonDetails>(`/person/${personId}`);
+  return {
+    id: data.id,
+    name: data.name,
+    biography: data.biography,
+    birthday: data.birthday,
+    deathday: data.deathday,
+    place_of_birth: data.place_of_birth,
+    profile_url: getProfileImageUrl(data.profile_path),
+    known_for_department: data.known_for_department,
+  };
+}
+
+// Get person's combined credits (movies + TV shows)
+interface TMDBCombinedCredits {
+  cast: (TMDBMovie & { media_type: 'movie' | 'tv'; character?: string; name?: string; first_air_date?: string })[];
+  crew: (TMDBMovie & { media_type: 'movie' | 'tv'; job?: string; name?: string; first_air_date?: string })[];
+}
+
+export async function getPersonCombinedCredits(personId: number): Promise<(Movie | TVShow)[]> {
+  const data = await tmdbFetch<TMDBCombinedCredits>(`/person/${personId}/combined_credits`);
+
+  const contentMap = new Map<string, TMDBCombinedCredits['cast'][0]>();
+
+  for (const item of data.cast) {
+    const key = `${item.media_type}-${item.id}`;
+    if (!contentMap.has(key)) {
+      contentMap.set(key, item);
+    }
+  }
+
+  for (const item of data.crew) {
+    if (item.job === 'Director') {
+      const key = `${item.media_type}-${item.id}`;
+      if (!contentMap.has(key)) {
+        contentMap.set(key, item as TMDBCombinedCredits['cast'][0]);
+      }
+    }
+  }
+
+  const sorted = Array.from(contentMap.values())
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+    .slice(0, 30);
+
+  return sorted.map((item) => {
+    if (item.media_type === 'movie') {
+      return { ...transformMovie(item as TMDBMovie), content_type: 'movie' as const };
+    } else {
+      const tvItem = {
+        ...item,
+        name: item.name || item.title || '',
+        first_air_date: item.first_air_date || '',
+      };
+      return { ...transformTVShow(tvItem as any), content_type: 'tv' as const };
+    }
+  });
 }
 
 // ============================================

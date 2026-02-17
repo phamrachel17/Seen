@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 
@@ -6,9 +6,10 @@ interface PersonCardProps {
   name: string;
   role: string;
   imageUrl: string;
+  onPress?: () => void;
 }
 
-export function PersonCard({ name, role, imageUrl }: PersonCardProps) {
+export function PersonCard({ name, role, imageUrl, onPress }: PersonCardProps) {
   // Get initials for fallback
   const initials = name
     .split(' ')
@@ -17,8 +18,8 @@ export function PersonCard({ name, role, imageUrl }: PersonCardProps) {
     .join('')
     .toUpperCase();
 
-  return (
-    <View style={styles.container}>
+  const content = (
+    <>
       {imageUrl ? (
         <Image
           source={{ uri: imageUrl }}
@@ -37,8 +38,21 @@ export function PersonCard({ name, role, imageUrl }: PersonCardProps) {
       <Text style={styles.role} numberOfLines={1}>
         {role}
       </Text>
-    </View>
+    </>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.container, pressed && { opacity: 0.7 }]}
+        onPress={onPress}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.container}>{content}</View>;
 }
 
 const CARD_WIDTH = 80;

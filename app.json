@@ -2,7 +2,7 @@
   "expo": {
     "name": "Seen",
     "slug": "seen",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/manAndTv.jpg",
     "scheme": "seen",
@@ -61,7 +61,8 @@
           "organization": "rachel-pham"
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

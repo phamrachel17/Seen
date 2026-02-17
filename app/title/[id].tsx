@@ -8,6 +8,9 @@ import {
   Animated,
   StatusBar,
   RefreshControl,
+  Modal,
+  ScrollView,
+  Linking,
 } from 'react-native';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
@@ -20,7 +23,8 @@ import { StarDisplay } from '@/components/ui/star-display';
 import { CastCrewSection } from '@/components/cast-crew-section';
 import { FriendChipsDisplay } from '@/components/friend-chips';
 import { AddToListModal } from '@/components/add-to-list-modal';
-import { getMovieDetails, getTVShowDetails, getSimilarMovies, getSimilarTVShows } from '@/lib/tmdb';
+import { ProfileAvatar } from '@/components/profile-avatar';
+import { getMovieDetails, getTVShowDetails, getSimilarMovies, getSimilarTVShows, getMovieVideos, getTVShowVideos } from '@/lib/tmdb';
 import { HorizontalMovieRow } from '@/components/horizontal-movie-row';
 import { getExternalRatings } from '@/lib/omdb';
 import { getContentByTmdbId, ensureContentExists } from '@/lib/content';
@@ -28,9 +32,8 @@ import {
   getUserCompletedActivity,
   getUserInProgressActivity,
   getFriendsActivitiesForContent,
+  getFriendsWhoBookmarked,
   formatProgress,
-  createActivity,
-  deleteActivity,
   getActiveWatch,
   createBookmarkActivity,
   deleteBookmarkActivity,
@@ -50,6 +53,7 @@ import {
   Watch,
   ExternalRatings,
   SeasonRating,
+  User,
 } from '@/types';
 import { ActivityFeedCard } from '@/components/activity-feed-card';
 import { getSeasonRatings } from '@/lib/season-ratings';
@@ -66,6 +70,11 @@ export default function TitleDetailScreen() {
   const { user } = useAuth();
 
   const scrollY = useRef(new Animated.Value(0)).current;
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // Content state
   const [content, setContent] = useState<Content | null>(null);
@@ -77,8 +86,7 @@ export default function TitleDetailScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [isTogglingBookmark, setIsTogglingBookmark] = useState(false);
-  const [isInProgress, setIsInProgress] = useState(false);
-  const [isTogglingInProgress, setIsTogglingInProgress] = useState(false);
+
 
   // Activity state
   const [completedActivity, setCompletedActivity] = useState<Activity | null>(null);
@@ -105,8 +113,20 @@ export default function TitleDetailScreen() {
   const [selectedSeasonForRating, setSelectedSeasonForRating] = useState<number | null>(null);
   const [showAllSeasons, setShowAllSeasons] = useState(false);
 
+  // Friends who want to watch
+  const [friendsWantToWatch, setFriendsWantToWatch] = useState<
+    Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>[]
+  >([]);
+  const [showFriendsWatchlistModal, setShowFriendsWatchlistModal] = useState(false);
+
+  // Friends' Activity grouped view
+  const [expandedFriendSeasons, setExpandedFriendSeasons] = useState<Set<number>>(new Set());
+
   // Similar content
   const [similarContent, setSimilarContent] = useState<(Movie | TVShow)[]>([]);
+
+  // Trailer
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -142,23 +162,30 @@ export default function TitleDetailScreen() {
 
       // Load content details from TMDB
       if (contentType === 'movie') {
-        const [details, similar] = await Promise.all([
+        const [details, similar, videos] = await Promise.all([
           getMovieDetails(tmdbId),
           getSimilarMovies(tmdbId),
+          getMovieVideos(tmdbId),
         ]);
+        if (!isMountedRef.current) return;
         setMovieDetails(details);
         setSimilarContent(similar);
+        setTrailerKey(videos.trailerKey || videos.teaserKey);
       } else {
-        const [details, similar] = await Promise.all([
+        const [details, similar, videos] = await Promise.all([
           getTVShowDetails(tmdbId),
           getSimilarTVShows(tmdbId),
+          getTVShowVideos(tmdbId),
         ]);
+        if (!isMountedRef.current) return;
         setTVDetails(details);
         setSimilarContent(similar);
+        setTrailerKey(videos.trailerKey || videos.teaserKey);
       }
 
       // Ensure content exists in DB
       const contentRecord = await ensureContentExists(tmdbId, contentType);
+      if (!isMountedRef.current) return;
       setContent(contentRecord);
 
       if (!contentRecord) return;
@@ -169,11 +196,15 @@ export default function TitleDetailScreen() {
       }
 
       // Load community rating
-      await loadCommunityRating(contentRecord.id);
+      if (isMountedRef.current) {
+        await loadCommunityRating(contentRecord.id);
+      }
     } catch (error) {
       console.error('Error loading content:', error);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -186,21 +217,22 @@ export default function TitleDetailScreen() {
       const idsForActivity = [...followingIds, user.id]; // Include self to show own activity in feed
 
       const contentType = type || 'movie';
-      const [completed, inProgress, watch, bookmark, ranking, friendsActs] = await Promise.all([
+      const [completed, inProgress, watch, bookmark, ranking, friendsActs, friendsBookmarked] = await Promise.all([
         getUserCompletedActivity(user.id, contentId),
         getUserInProgressActivity(user.id, contentId),
         getActiveWatch(user.id, contentId),
         checkBookmarkStatus(contentId),
         loadUserRanking(tmdbId, contentType),
         getFriendsActivitiesForContent(user.id, contentId, idsForActivity),
+        getFriendsWhoBookmarked(contentId, followingIds),
       ]);
 
       setCompletedActivity(completed);
       setInProgressActivity(inProgress);
       setActiveWatch(watch);
-      setIsInProgress(!!inProgress);
       setIsBookmarked(!!bookmark);
       setUserRanking(ranking);
+      setFriendsWantToWatch(friendsBookmarked);
 
       // Collect unique activities per friend (one in-progress + one completed per user)
       // This ensures we show both types of activity but not duplicates
@@ -208,18 +240,19 @@ export default function TitleDetailScreen() {
       const uniqueActivities: Activity[] = [];
 
       for (const activity of friendsActs) {
-        const key = `${activity.user_id}-${activity.status}`;
+        if (activity.status === 'bookmarked') continue;
+        const key = `${activity.user_id}-${activity.status}-${activity.rated_season ?? 'overall'}`;
         if (!seenUserStatus.has(key)) {
           seenUserStatus.add(key);
           uniqueActivities.push(activity);
         }
       }
 
-      // Sort by created_at descending and limit to 5
+      // Sort by created_at descending and limit to 20 (structured display handles density)
       uniqueActivities.sort((a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
-      setFriendsActivities(uniqueActivities.slice(0, 5));
+      setFriendsActivities(uniqueActivities.slice(0, 20));
 
       // Load season ratings for TV shows
       if (contentType === 'tv') {
@@ -325,39 +358,6 @@ export default function TitleDetailScreen() {
     }
   };
 
-  const toggleInProgress = async () => {
-    if (!content || !user || isTogglingInProgress) return;
-
-    setIsTogglingInProgress(true);
-
-    try {
-      if (isInProgress) {
-        // Remove: Find and delete the in-progress activity
-        const activity = await getUserInProgressActivity(user.id, content.id);
-        if (activity) {
-          await deleteActivity(activity.id);
-        }
-        setIsInProgress(false);
-        setInProgressActivity(null);
-      } else {
-        // Add: Create a simple in-progress activity
-        const activity = await createActivity({
-          userId: user.id,
-          tmdbId: content.tmdb_id,
-          contentType: content.content_type,
-          status: 'in_progress',
-          watchDate: new Date(),
-        });
-        setIsInProgress(!!activity);
-        setInProgressActivity(activity);
-      }
-    } catch (error) {
-      console.error('Error toggling in-progress:', error);
-    } finally {
-      setIsTogglingInProgress(false);
-    }
-  };
-
   const openLogActivity = (editDirectly?: boolean, editInProgress?: boolean, editDetailsOnly?: boolean) => {
     if (content) {
       const params = new URLSearchParams();
@@ -435,6 +435,66 @@ export default function TitleDetailScreen() {
   const headerImageUrl = backdropUrl || posterUrl;
   const hasActivity = completedActivity || inProgressActivity;
 
+  // Group friends' activities for structured display
+  const overallRatings = friendsActivities.filter(
+    a => a.status === 'completed' && !a.rated_season
+  );
+  const seasonRatingsByNumber = new Map<number, Activity[]>();
+  for (const a of friendsActivities) {
+    if (a.status === 'completed' && a.rated_season) {
+      const existing = seasonRatingsByNumber.get(a.rated_season) || [];
+      existing.push(a);
+      seasonRatingsByNumber.set(a.rated_season, existing);
+    }
+  }
+  const sortedFriendSeasons = [...seasonRatingsByNumber.entries()].sort(
+    ([a], [b]) => a - b
+  );
+  const inProgressActivities = friendsActivities.filter(
+    a => a.status === 'in_progress'
+  );
+
+  const toggleFriendSeason = (seasonNum: number) => {
+    setExpandedFriendSeasons(prev => {
+      const next = new Set(prev);
+      if (next.has(seasonNum)) next.delete(seasonNum);
+      else next.add(seasonNum);
+      return next;
+    });
+  };
+
+  const FriendRatingRow = ({ activity }: { activity: Activity }) => {
+    const friend = activity.user;
+    if (!friend) return null;
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.friendRatingRow,
+          pressed && { opacity: 0.7 },
+        ]}
+        onPress={() => router.push(`/user/${friend.id}` as any)}
+      >
+        <ProfileAvatar
+          imageUrl={friend.profile_image_url}
+          username={friend.username}
+          size="tiny"
+          variant="circle"
+        />
+        <Text style={styles.friendRatingName} numberOfLines={1}>
+          {friend.display_name || friend.username}
+        </Text>
+        <View style={styles.friendRatingStars}>
+          <StarDisplay rating={activity.star_rating || 0} size={12} />
+        </View>
+        {activity.review_text && (
+          <Text style={styles.friendRatingReview} numberOfLines={1}>
+            {activity.review_text}
+          </Text>
+        )}
+      </Pressable>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -496,6 +556,8 @@ export default function TitleDetailScreen() {
           />
         }
       >
+        {/* Content wrapper ensures opaque background below poster */}
+        <View style={styles.contentWrapper}>
         {/* Title Info */}
         <View style={styles.infoContainer}>
           <Text style={styles.title}>{title}</Text>
@@ -524,14 +586,18 @@ export default function TitleDetailScreen() {
             </View>
             <View style={styles.actionButtons}>
               <Pressable
-                onPress={toggleInProgress}
+                onPress={() => {
+                  if (trailerKey) {
+                    Linking.openURL(`https://www.youtube.com/watch?v=${trailerKey}`);
+                  }
+                }}
                 style={styles.inProgressButtonInline}
-                disabled={isTogglingInProgress}
+                disabled={!trailerKey}
               >
                 <IconSymbol
-                  name={isInProgress ? 'play.circle.fill' : 'play.circle'}
+                  name="play.circle.fill"
                   size={22}
-                  color={Colors.stamp}
+                  color={trailerKey ? Colors.stamp : Colors.textMuted}
                 />
               </Pressable>
               <Pressable
@@ -627,6 +693,43 @@ export default function TitleDetailScreen() {
             </View>
           )}
 
+          {/* Friends Want to Watch */}
+          {friendsWantToWatch.length > 0 && (
+            <Pressable
+              style={styles.friendsWantToWatchRow}
+              onPress={() => setShowFriendsWatchlistModal(true)}
+            >
+              <View style={styles.avatarStack}>
+                {friendsWantToWatch.slice(0, 5).map((friend, index) => (
+                  <View
+                    key={friend.id}
+                    style={[
+                      styles.stackedAvatar,
+                      { marginLeft: index === 0 ? 0 : -8, zIndex: 5 - index },
+                    ]}
+                  >
+                    <ProfileAvatar
+                      imageUrl={friend.profile_image_url}
+                      username={friend.username}
+                      size="tiny"
+                      variant="circle"
+                    />
+                  </View>
+                ))}
+                {friendsWantToWatch.length > 5 && (
+                  <View style={[styles.overflowBadge, { marginLeft: -8 }]}>
+                    <Text style={styles.overflowBadgeText}>
+                      +{friendsWantToWatch.length - 5}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.friendsWantToWatchText}>
+                {friendsWantToWatch.length} {friendsWantToWatch.length === 1 ? 'friend wants' : 'friends want'} to watch
+              </Text>
+            </Pressable>
+          )}
+
           {/* Synopsis */}
           {synopsis && <Text style={styles.synopsis}>{synopsis}</Text>}
 
@@ -659,145 +762,152 @@ export default function TitleDetailScreen() {
             </Pressable>
           </View>
 
-          {/* Your Take Section (Completed) */}
-          {completedActivity && (
+          {/* Your Take Section (Completed + Season Ratings for TV) */}
+          {(completedActivity || (contentType === 'tv' && tvDetails?.seasons && tvDetails.seasons.length > 0)) && (
             <View style={styles.yourTakeSection}>
               <View style={styles.yourTakeHeader}>
                 <Text style={styles.sectionLabel}>Your Take:</Text>
               </View>
 
-              {/* Ranking Info - show when item is ranked (ABOVE the review card) */}
-              {userRanking && (
-                <View style={styles.rankingInfoContainer}>
-                  <View style={styles.rankingInfoRow}>
-                    {/* Score Badge */}
-                    <View style={[
-                      styles.scoreBadge,
-                      { borderColor: getScoreColor(userRanking.display_score) }
-                    ]}>
-                      <Text style={[
-                        styles.scoreBadgeText,
-                        { color: getScoreColor(userRanking.display_score) }
-                      ]}>
-                        {userRanking.display_score.toFixed(1)}
-                      </Text>
-                    </View>
+              {/* Overall rating + ranking info - only if completedActivity */}
+              {completedActivity && (
+                <>
+                  {/* Ranking Info - show when item is ranked (ABOVE the review card) */}
+                  {userRanking && (
+                    <View style={styles.rankingInfoContainer}>
+                      <View style={styles.rankingInfoRow}>
+                        {/* Score Badge */}
+                        <View style={[
+                          styles.scoreBadge,
+                          { borderColor: getScoreColor(userRanking.display_score) }
+                        ]}>
+                          <Text style={[
+                            styles.scoreBadgeText,
+                            { color: getScoreColor(userRanking.display_score) }
+                          ]}>
+                            {userRanking.display_score.toFixed(1)}
+                          </Text>
+                        </View>
 
-                    {/* Position and Context */}
-                    <View style={styles.rankingTextContainer}>
-                      <Text style={styles.rankingPositionText}>
-                        #{userRanking.rank_position}
-                        {totalRankingsCount > 0 && ` of ${totalRankingsCount}`}
-                      </Text>
-                      <Text style={styles.rankingContextText}>
-                        in your {userRanking.content_type === 'movie' ? 'Movies' : 'TV Shows'} rankings
-                      </Text>
+                        {/* Position and Context */}
+                        <View style={styles.rankingTextContainer}>
+                          <Text style={styles.rankingPositionText}>
+                            #{userRanking.rank_position}
+                            {totalRankingsCount > 0 && ` of ${totalRankingsCount}`}
+                          </Text>
+                          <Text style={styles.rankingContextText}>
+                            in your {userRanking.content_type === 'movie' ? 'Movies' : 'TV Shows'} rankings
+                          </Text>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                </View>
-              )}
+                  )}
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.activityCard,
-                  pressed && styles.cardPressed,
-                ]}
-                onPress={() => openLogActivity(false, false, true)}
-              >
-                <View style={styles.activityHeader}>
-                  <View style={styles.starsRow}>
-                    {completedActivity.watch && (
-                      <View style={styles.watchNumberBadge}>
-                        <Text style={styles.watchNumberText}>Watch #{completedActivity.watch.watch_number}</Text>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.activityCard,
+                      pressed && styles.cardPressed,
+                    ]}
+                    onPress={() => openLogActivity(false, false, true)}
+                  >
+                    <View style={styles.activityHeader}>
+                      <View style={styles.starsRow}>
+                        {completedActivity.watch && (
+                          <View style={styles.watchNumberBadge}>
+                            <Text style={styles.watchNumberText}>Watch #{completedActivity.watch.watch_number}</Text>
+                          </View>
+                        )}
+                        <StarDisplay rating={completedActivity.star_rating || 0} size={16} />
+                      </View>
+                    </View>
+                    {completedActivity.review_text && (
+                      <Text style={styles.reviewText}>{completedActivity.review_text}</Text>
+                    )}
+                    {completedActivity.tagged_friends && completedActivity.tagged_friends.length > 0 && (
+                      <FriendChipsDisplay userIds={completedActivity.tagged_friends} />
+                    )}
+                    {completedActivity.watch_date && (
+                      <View style={styles.watchDateRow}>
+                        <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
+                        <Text style={styles.watchDateText}>
+                          Watched {new Date(completedActivity.watch_date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </Text>
                       </View>
                     )}
-                    <StarDisplay rating={completedActivity.star_rating || 0} size={16} />
-                  </View>
-                </View>
-                {completedActivity.review_text && (
-                  <Text style={styles.reviewText}>{completedActivity.review_text}</Text>
-                )}
-                {completedActivity.tagged_friends && completedActivity.tagged_friends.length > 0 && (
-                  <FriendChipsDisplay userIds={completedActivity.tagged_friends} />
-                )}
-                {completedActivity.watch_date && (
-                  <View style={styles.watchDateRow}>
-                    <IconSymbol name="calendar" size={14} color={Colors.textMuted} />
-                    <Text style={styles.watchDateText}>
-                      Watched {new Date(completedActivity.watch_date).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
+                    <View style={styles.editHint}>
+                      <IconSymbol name="pencil" size={12} color={Colors.textMuted} />
+                      <Text style={styles.editHintText}>Tap to edit</Text>
+                    </View>
+                  </Pressable>
+                </>
+              )}
+
+              {/* Season Ratings - nested under Your Take for TV shows */}
+              {contentType === 'tv' && tvDetails?.seasons && tvDetails.seasons.length > 0 && (() => {
+                const allSeasons = tvDetails.seasons.filter(s => s.season_number > 0);
+                const displayedSeasons = showAllSeasons ? allSeasons : allSeasons.slice(0, 3);
+                const hasMoreSeasons = allSeasons.length > 3;
+
+                return (
+                  <>
+                    <View style={[styles.subheaderPill, { marginTop: 0 }]}>
+                      <Text style={styles.subheaderPillText}>Your Season Ratings</Text>
+                    </View>
+                    <View style={styles.seasonRatingsList}>
+                      {displayedSeasons.map((season, index) => {
+                        const rating = seasonRatings.find(r => r.season_number === season.season_number);
+                        const isLast = index === displayedSeasons.length - 1 && !hasMoreSeasons;
+                        return (
+                          <Pressable
+                            key={season.season_number}
+                            style={({ pressed }) => [
+                              styles.seasonRatingRow,
+                              !isLast && styles.seasonRatingRowBorder,
+                              pressed && styles.seasonRatingRowPressed,
+                            ]}
+                            onPress={() => setSelectedSeasonForRating(season.season_number)}
+                          >
+                            <View style={styles.seasonRatingLeft}>
+                              <Text style={styles.seasonLabel}>Season {season.season_number}</Text>
+                              {rating?.review_text && (
+                                <Text style={styles.seasonReviewPreview} numberOfLines={1}>
+                                  <Text style={styles.seasonReviewLabel}>Critique: </Text>
+                                  {rating.review_text}
+                                </Text>
+                              )}
+                            </View>
+                            {rating ? (
+                              <StarDisplay rating={rating.star_rating} size={14} />
+                            ) : (
+                              <Text style={styles.rateSeasonHint}>Tap to rate</Text>
+                            )}
+                          </Pressable>
+                        );
                       })}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.editHint}>
-                  <IconSymbol name="pencil" size={12} color={Colors.textMuted} />
-                  <Text style={styles.editHintText}>Tap to edit</Text>
-                </View>
-              </Pressable>
+                      {hasMoreSeasons && (
+                        <Pressable
+                          style={styles.showAllSeasonsButton}
+                          onPress={() => setShowAllSeasons(!showAllSeasons)}
+                        >
+                          <Text style={styles.showAllSeasonsText}>
+                            {showAllSeasons ? 'Show less' : `Show all ${allSeasons.length} seasons`}
+                          </Text>
+                          <IconSymbol
+                            name={showAllSeasons ? 'chevron.up' : 'chevron.down'}
+                            size={14}
+                            color={Colors.stamp}
+                          />
+                        </Pressable>
+                      )}
+                    </View>
+                  </>
+                );
+              })()}
             </View>
           )}
-
-          {/* Season Ratings Section - TV Shows Only */}
-          {contentType === 'tv' && tvDetails?.seasons && tvDetails.seasons.length > 0 && (() => {
-            const allSeasons = tvDetails.seasons.filter(s => s.season_number > 0);
-            const displayedSeasons = showAllSeasons ? allSeasons : allSeasons.slice(0, 3);
-            const hasMoreSeasons = allSeasons.length > 3;
-
-            return (
-              <View style={styles.seasonRatingsSection}>
-                <Text style={styles.sectionLabel}>Your Season Ratings:</Text>
-                <View style={styles.seasonRatingsList}>
-                  {displayedSeasons.map((season, index) => {
-                    const rating = seasonRatings.find(r => r.season_number === season.season_number);
-                    const isLast = index === displayedSeasons.length - 1 && !hasMoreSeasons;
-                    return (
-                      <Pressable
-                        key={season.season_number}
-                        style={({ pressed }) => [
-                          styles.seasonRatingRow,
-                          !isLast && styles.seasonRatingRowBorder,
-                          pressed && styles.seasonRatingRowPressed,
-                        ]}
-                        onPress={() => setSelectedSeasonForRating(season.season_number)}
-                      >
-                        <View style={styles.seasonRatingLeft}>
-                          <Text style={styles.seasonLabel}>Season {season.season_number}</Text>
-                          {rating?.review_text && (
-                            <Text style={styles.seasonReviewPreview} numberOfLines={1}>
-                              <Text style={styles.seasonReviewLabel}>Critique: </Text>
-                              {rating.review_text}
-                            </Text>
-                          )}
-                        </View>
-                        {rating ? (
-                          <StarDisplay rating={rating.star_rating} size={14} />
-                        ) : (
-                          <Text style={styles.rateSeasonHint}>Tap to rate</Text>
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                  {hasMoreSeasons && (
-                    <Pressable
-                      style={styles.showAllSeasonsButton}
-                      onPress={() => setShowAllSeasons(!showAllSeasons)}
-                    >
-                      <Text style={styles.showAllSeasonsText}>
-                        {showAllSeasons ? 'Show less' : `Show all ${allSeasons.length} seasons`}
-                      </Text>
-                      <IconSymbol
-                        name={showAllSeasons ? 'chevron.up' : 'chevron.down'}
-                        size={14}
-                        color={Colors.stamp}
-                      />
-                    </Pressable>
-                  )}
-                </View>
-              </View>
-            );
-          })()}
 
           {/* Your Progress Section (In Progress) */}
           {inProgressActivity && (
@@ -856,15 +966,73 @@ export default function TitleDetailScreen() {
         {friendsActivities.length > 0 && (
           <View style={styles.friendsSection}>
             <Text style={styles.sectionLabel}>Friends&apos; Activity:</Text>
-            <View style={styles.friendsActivityList}>
-              {friendsActivities.map((activity) => (
-                <ActivityFeedCard
-                  key={activity.id}
-                  activity={activity}
-                  hidePoster={true}
-                />
-              ))}
-            </View>
+
+            {/* Overall Ratings */}
+            {overallRatings.length > 0 && (
+              <>
+                {sortedFriendSeasons.length > 0 && (
+                  <View style={[styles.subheaderPill, { marginTop: Spacing.sm }]}>
+                    <Text style={styles.subheaderPillText}>Friends&apos; Overall Show Rating</Text>
+                  </View>
+                )}
+                <View style={styles.friendsActivityList}>
+                  {overallRatings.map((activity) => (
+                    <ActivityFeedCard key={activity.id} activity={activity} hidePoster />
+                  ))}
+                </View>
+              </>
+            )}
+
+            {/* Per-Season Ratings (collapsible) */}
+            {sortedFriendSeasons.length > 0 && (
+              <View style={styles.subheaderPill}>
+                <Text style={styles.subheaderPillText}>Friends&apos; Season Ratings</Text>
+              </View>
+            )}
+            {sortedFriendSeasons.map(([seasonNum, activities]) => {
+              const isExpanded = expandedFriendSeasons.has(seasonNum);
+              return (
+                <View key={seasonNum}>
+                  <Pressable
+                    style={styles.seasonToggleRow}
+                    onPress={() => toggleFriendSeason(seasonNum)}
+                  >
+                    <IconSymbol
+                      name={isExpanded ? 'chevron.down' : 'chevron.right'}
+                      size={14}
+                      color={Colors.textMuted}
+                    />
+                    <Text style={styles.seasonToggleText}>
+                      Season {seasonNum}
+                    </Text>
+                    <Text style={styles.seasonToggleCount}>
+                      {activities.length} {activities.length === 1 ? 'rating' : 'ratings'}
+                    </Text>
+                  </Pressable>
+                  {isExpanded && (
+                    <View style={styles.friendsGroupCard}>
+                      {activities.map((activity) => (
+                        <FriendRatingRow key={activity.id} activity={activity} />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+
+            {/* In Progress */}
+            {inProgressActivities.length > 0 && (
+              <>
+                <View style={styles.subheaderPill}>
+                  <Text style={styles.subheaderPillText}>In Progress</Text>
+                </View>
+                <View style={styles.friendsActivityList}>
+                  {inProgressActivities.map((activity) => (
+                    <ActivityFeedCard key={activity.id} activity={activity} hidePoster />
+                  ))}
+                </View>
+              </>
+            )}
           </View>
         )}
 
@@ -883,6 +1051,7 @@ export default function TitleDetailScreen() {
             />
           </View>
         )}
+        </View>
       </Animated.ScrollView>
 
       {/* Add to List Modal */}
@@ -894,6 +1063,59 @@ export default function TitleDetailScreen() {
           contentTitle={title}
         />
       )}
+
+      {/* Friends Want to Watch Modal */}
+      <Modal
+        visible={showFriendsWatchlistModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFriendsWatchlistModal(false)}
+      >
+        <Pressable
+          style={styles.fwModalOverlay}
+          onPress={() => setShowFriendsWatchlistModal(false)}
+        >
+          <Pressable
+            style={[styles.fwModalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.fwModalHeader}>
+              <Text style={styles.fwModalTitle}>Want to Watch</Text>
+              <Pressable
+                style={styles.fwModalClose}
+                onPress={() => setShowFriendsWatchlistModal(false)}
+              >
+                <IconSymbol name="xmark" size={18} color={Colors.text} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {friendsWantToWatch.map((friend) => (
+                <Pressable
+                  key={friend.id}
+                  style={({ pressed }) => [
+                    styles.fwModalRow,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  onPress={() => {
+                    setShowFriendsWatchlistModal(false);
+                    router.push(`/user/${friend.id}` as any);
+                  }}
+                >
+                  <ProfileAvatar
+                    imageUrl={friend.profile_image_url}
+                    username={friend.username}
+                    size="small"
+                    variant="circle"
+                  />
+                  <Text style={styles.fwModalName}>
+                    {friend.display_name || friend.username}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Season Rating Sheet - TV Shows Only */}
       {content && selectedSeasonForRating !== null && (
@@ -1008,6 +1230,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: Spacing['3xl'],
     minHeight: SCREEN_HEIGHT + HEADER_MIN_HEIGHT,
+  },
+  contentWrapper: {
+    backgroundColor: Colors.background,
   },
   infoContainer: {
     backgroundColor: Colors.background,
@@ -1196,14 +1421,10 @@ const styles = StyleSheet.create({
   yourProgressSection: {
     marginBottom: Spacing.xl,
   },
-  seasonRatingsSection: {
-    marginBottom: Spacing.xl,
-  },
   seasonRatingsList: {
     backgroundColor: Colors.cardBackground,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
-    marginTop: Spacing.md,
   },
   seasonRatingRow: {
     flexDirection: 'row',
@@ -1268,7 +1489,7 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontFamily: Fonts.serifExtraBold,
-    fontSize: FontSizes.xl,
+    fontSize: FontSizes['2xl'],
     color: Colors.text,
   },
   sectionLabelRow: {
@@ -1412,9 +1633,155 @@ const styles = StyleSheet.create({
   },
   friendsActivityList: {
     gap: Spacing.md,
-    marginTop: Spacing.md,
+    marginTop: Spacing.xs,
+  },
+  friendsGroupCard: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  subheaderPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(128, 47, 29, 0.15)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
+  subheaderPillText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
+  },
+  seasonToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  seasonToggleText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    flex: 1,
+  },
+  seasonToggleCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  friendRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  friendRatingName: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+    width: 80,
+  },
+  friendRatingStars: {
+    flexDirection: 'row',
+  },
+  friendRatingReview: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    flex: 1,
+    marginLeft: Spacing.sm,
   },
   similarSection: {
     marginTop: Spacing.lg,
+  },
+  // Friends Want to Watch row
+  friendsWantToWatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  avatarStack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stackedAvatar: {
+    borderWidth: 2,
+    borderColor: Colors.background,
+    borderRadius: BorderRadius.full,
+  },
+  overflowBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.dust,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.background,
+  },
+  overflowBadgeText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 10,
+    color: Colors.textMuted,
+  },
+  friendsWantToWatchText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.textMuted,
+  },
+  // Friends watchlist modal
+  fwModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  fwModalSheet: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    maxHeight: '60%',
+  },
+  fwModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.lg,
+  },
+  fwModalTitle: {
+    fontFamily: Fonts.serifBold,
+    fontSize: FontSizes.xl,
+    color: Colors.text,
+  },
+  fwModalClose: {
+    width: 32,
+    height: 32,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.dust,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fwModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  fwModalName: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.md,
+    color: Colors.text,
+    flex: 1,
   },
 });

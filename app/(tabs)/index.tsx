@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -22,7 +23,11 @@ import { Activity } from '@/types';
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const navigation = useNavigation();
   const { user } = useAuth();
+
+  // Ref for scrolling to top on tab press
+  const flatListRef = useRef<FlatList<Activity>>(null);
 
   // Use cached feed hook
   const {
@@ -35,6 +40,18 @@ export default function FeedScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [displayName, setDisplayName] = useState<string>('');
+
+  // Scroll to top when tab is pressed while already on feed
+  useEffect(() => {
+    const parent = navigation.getParent();
+    if (!parent) return;
+
+    // @ts-expect-error - tabPress event exists on tab navigators but types are incomplete
+    const unsubscribe = parent.addListener('tabPress', () => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   // Load profile data and notification count
   const loadExtras = useCallback(async () => {
@@ -152,6 +169,7 @@ export default function FeedScreen() {
         <LoadingScreen />
       ) : (
         <FlatList
+          ref={flatListRef}
           data={activities}
           keyExtractor={keyExtractor}
           renderItem={renderItem}

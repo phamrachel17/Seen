@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Colors, Fonts, FontSizes, Spacing } from '@/constants/theme';
 import { SegmentedControl } from './segmented-control';
 import { PersonCard } from './person-card';
@@ -11,6 +12,7 @@ interface CastCrewSectionProps {
 }
 
 export function CastCrewSection({ cast, crew }: CastCrewSectionProps) {
+  const router = useRouter();
   const [selectedTab, setSelectedTab] = useState(0);
 
   const showCast = selectedTab === 0;
@@ -49,6 +51,7 @@ export function CastCrewSection({ cast, crew }: CastCrewSectionProps) {
               name={item.name}
               role={showCast ? (item as CastMember).character : (item as CrewMember).job}
               imageUrl={item.profile_url}
+              onPress={() => router.push(`/person/${item.id}` as any)}
             />
           ))}
         </ScrollView>

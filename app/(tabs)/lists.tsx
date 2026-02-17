@@ -195,9 +195,14 @@ export default function ListsScreen() {
         {/* Want to Watch Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Want to Watch</Text>
-          {watchlist.length > 0 ? (
-            <Text style={styles.countBadge}>{watchlist.length} films</Text>
-          ) : null}
+          {watchlist.length > 0 && (
+            <View style={styles.sectionHeaderRight}>
+              <Text style={styles.countBadge}>{watchlist.length} films</Text>
+              <Pressable onPress={() => router.push('/watchlist' as any)}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
         {watchlist.length > 0 ? (
@@ -243,9 +248,14 @@ export default function ListsScreen() {
         {/* Currently Watching Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Currently Watching</Text>
-          {currentlyWatching.length > 0 ? (
-            <Text style={styles.countBadge}>{currentlyWatching.length} titles</Text>
-          ) : null}
+          {currentlyWatching.length > 0 && (
+            <View style={styles.sectionHeaderRight}>
+              <Text style={styles.countBadge}>{currentlyWatching.length} titles</Text>
+              <Pressable onPress={() => router.push('/currently-watching' as any)}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
         {currentlyWatching.length > 0 ? (
@@ -471,6 +481,16 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1,
+  },
+  sectionHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: Spacing.md,
+  },
+  viewAllText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.stamp,
   },
   watchlistScroll: {
     paddingRight: Spacing.xl,

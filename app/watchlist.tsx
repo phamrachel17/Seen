@@ -6,6 +6,7 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -75,12 +76,43 @@ export default function WatchlistScreen() {
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadWatchlist();
-    setIsRefreshing(false);
+    try {
+      await loadWatchlist();
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const navigateToContent = (tmdbId: number, contentType: string) => {
     router.push(`/title/${tmdbId}?type=${contentType}` as any);
+  };
+
+  const handleRemoveBookmark = (contentId: number, title: string) => {
+    if (!isOwnWatchlist) return;
+
+    Alert.alert(
+      'Remove from Watchlist',
+      `Remove "${title}" from your watchlist?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user) return;
+            const { error } = await supabase
+              .from('bookmarks')
+              .delete()
+              .eq('user_id', user.id)
+              .eq('content_id', contentId);
+
+            if (!error) {
+              setMovies(movies.filter((item) => item.id !== contentId));
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -90,7 +122,12 @@ export default function WatchlistScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{isOwnWatchlist ? 'Want to Watch' : 'Their Want to Watch'}</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>{isOwnWatchlist ? 'Want to Watch' : 'Their Watchlist'}</Text>
+          <Text style={styles.headerSubtitle}>
+            {movies.length} {movies.length === 1 ? 'film' : 'films'}
+          </Text>
+        </View>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -133,6 +170,7 @@ export default function WatchlistScreen() {
                   pressed && styles.itemPressed,
                 ]}
                 onPress={() => navigateToContent(movie.tmdb_id, movie.content_type)}
+                onLongPress={() => handleRemoveBookmark(movie.id, movie.title)}
               >
                 {/* Poster */}
                 {movie.poster_url ? (
@@ -193,10 +231,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
     fontFamily: Fonts.serifSemiBold,
     fontSize: FontSizes.xl,
     color: Colors.text,
+  },
+  headerSubtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   headerSpacer: {
     width: 40,

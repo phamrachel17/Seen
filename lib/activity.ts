@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Activity, ActivityStatus, Content, ContentType, Watch, WatchStatus, WatchWithActivities } from '@/types';
+import { Activity, ActivityStatus, Content, ContentType, User, Watch, WatchStatus, WatchWithActivities } from '@/types';
 import { ensureContentExists } from './content';
 
 export interface CreateActivityParams {
@@ -855,4 +855,20 @@ export async function deleteBookmarkActivity(
   }
 
   return true;
+}
+
+export async function getFriendsWhoBookmarked(
+  contentId: number,
+  followingIds: string[]
+): Promise<Pick<User, 'id' | 'username' | 'display_name' | 'profile_image_url'>[]> {
+  if (followingIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('user_id, user:user_id (id, username, display_name, profile_image_url)')
+    .eq('content_id', contentId)
+    .in('user_id', followingIds);
+
+  if (error || !data) return [];
+  return data.map((d: any) => d.user).filter(Boolean);
 }

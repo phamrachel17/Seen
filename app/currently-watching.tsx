@@ -62,8 +62,11 @@ export default function CurrentlyWatchingScreen() {
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadData();
-    setIsRefreshing(false);
+    try {
+      await loadData();
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const navigateToContent = (tmdbId: number, contentType: string) => {
@@ -77,9 +80,14 @@ export default function CurrentlyWatchingScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <IconSymbol name="arrow.left" size={24} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>
-          {isOwnList ? 'Currently Watching' : 'Their Currently Watching'}
-        </Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>
+            {isOwnList ? 'Currently Watching' : 'In Progress'}
+          </Text>
+          <Text style={styles.headerSubtitle}>
+            {activities.length} {activities.length === 1 ? 'title' : 'titles'}
+          </Text>
+        </View>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -182,10 +190,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
     fontFamily: Fonts.serifSemiBold,
     fontSize: FontSizes.xl,
     color: Colors.text,
+  },
+  headerSubtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   headerSpacer: {
     width: 40,

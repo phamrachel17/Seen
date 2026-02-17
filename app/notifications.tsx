@@ -118,24 +118,33 @@ export default function NotificationsScreen() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  const getActivityLabel = (status?: string) => {
+    switch (status) {
+      case 'bookmarked': return 'bookmark';
+      case 'in_progress': return 'activity';
+      default: return 'review';
+    }
+  };
+
   const getNotificationText = (notification: Notification) => {
     const actorName = notification.actor?.display_name || notification.actor?.username || 'Someone';
     // Use activity.content.title (new) or fall back to review.movies.title (legacy)
     const contentTitle = notification.activity?.content?.title || notification.review?.movies?.title;
+    const activityLabel = getActivityLabel(notification.activity?.status);
 
     switch (notification.type) {
       case 'like':
         return contentTitle
-          ? `${actorName} liked your review of ${contentTitle}`
-          : `${actorName} liked your review`;
+          ? `${actorName} liked your ${activityLabel} of ${contentTitle}`
+          : `${actorName} liked your ${activityLabel}`;
       case 'comment':
         return contentTitle
-          ? `${actorName} commented on your review of ${contentTitle}`
-          : `${actorName} commented on your review`;
+          ? `${actorName} commented on your ${activityLabel} of ${contentTitle}`
+          : `${actorName} commented on your ${activityLabel}`;
       case 'tagged':
         return contentTitle
-          ? `${actorName} tagged you in a review of ${contentTitle}`
-          : `${actorName} tagged you in a review`;
+          ? `${actorName} tagged you in a ${activityLabel} of ${contentTitle}`
+          : `${actorName} tagged you in a ${activityLabel}`;
       case 'follow':
         return `${actorName} started following you`;
       default:

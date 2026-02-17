@@ -141,13 +141,21 @@ function RootLayoutNav() {
     targetId: string,
     contentType?: string
   ) => {
+    // Validate targetId to prevent malformed navigation
+    if (!targetId || typeof targetId !== 'string') {
+      router.push('/notifications');
+      return;
+    }
+
     switch (type) {
       case 'like':
       case 'comment':
       case 'tagged':
-        // Navigate to title detail page
-        if (targetId && contentType) {
+        // Navigate to title detail page (validate contentType)
+        if (targetId && (contentType === 'movie' || contentType === 'tv')) {
           router.push(`/title/${targetId}?type=${contentType}` as any);
+        } else {
+          router.push('/notifications');
         }
         break;
       case 'follow':
