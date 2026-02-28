@@ -1,6 +1,6 @@
 # Seen — App Overview
 
-Seen is a social movie discovery and ranking app for cinephiles. It lets users track what they've watched, rate and review films, build personalized rankings, and discover new content through friends' activity.
+Seen is a social movie and TV discovery app for cinephiles. It lets users track what they've watched, rate and review films with half-star precision, build personalized rankings through pairwise comparisons, and discover new content through friends' activity.
 
 ---
 
@@ -8,39 +8,52 @@ Seen is a social movie discovery and ranking app for cinephiles. It lets users t
 
 **Primary Value Proposition**: Help movie lovers organize their viewing history, express opinions through nuanced rankings (not just ratings), and discover films through trusted social connections.
 
-**Key Differentiator**: The ranking system goes beyond simple star ratings—users build ordered lists where every film has a definitive position relative to others in the same star tier.
+**Key Differentiator**: The ranking system goes beyond simple star ratings — users build ordered lists where every title has a definitive position relative to others, with display scores (1.0–10.0) derived from position.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React Native (Expo, New Architecture) |
+| Navigation | Expo Router (file-based, typed routes) |
+| Backend | Supabase (PostgreSQL + Auth + Storage + Edge Functions) |
+| Content API | TMDB (movie/TV metadata, cast, trailers) |
+| Ratings API | OMDb (IMDb, Rotten Tomatoes, Metascore) |
+| State | React Context + custom hooks + in-memory cache |
+| Styling | React Native StyleSheet |
+| Analytics | PostHog (screen tracking, DAU, autocapture) |
+| Error Tracking | Sentry |
+| Notifications | Expo Notifications + Supabase Edge Functions |
 
 ---
 
 ## Key User Flows
 
-### 1. Authentication Flow
+### Authentication
 ```
-Landing → Sign Up (email/password) → Email Verification → Sign In → Home Feed
-                                           ↓
-                                   Verify Email Screen
-                                   (resend available)
+Landing → Sign Up (email/password/username) → Email Verification → Sign In → Home Feed
 ```
 
-### 2. Discovery Flow
+### Discovery & Rating
 ```
-Discover Tab → Browse Categories → Movie/Show Detail → Watch/Rate/Rank/Review
-                    ↓
-              Search → Results → Detail Page
+Discover Tab → Search/Browse → Title Detail → Rate (0.5–5 stars) → Pairwise Comparisons → Ranked Position
 ```
 
-### 3. Rating & Ranking Flow
+### TV Show Progress
 ```
-Movie Detail → "Rate" → Star Selection (1-5) → Pairwise Comparisons → Ranked Position Assigned
-                                                      ↓
-                                              Rankings Tab → Drag to Reorder
+Title Detail → Log Progress (season/episode) → Continue Watching → Complete → Rate & Rank
 ```
 
-### 4. Social Flow
+### Social
 ```
-Activity Feed → Friend's Activity → View Review/Rating → Go to Movie or User Profile
-      ↓
-Follow/Unfollow → Feed Updates
+Activity Feed → Friend's Activity → Like/Comment/Reply → View Title or User Profile
+```
+
+### Pick for Me
+```
+Discover Tab → Pick for Me → Set Filters (genre/mood/time) → Get Suggestion → Accept/Skip/Save
 ```
 
 ---
@@ -51,368 +64,298 @@ Follow/Unfollow → Feed Updates
 | Feature | Description |
 |---------|-------------|
 | Email Sign-Up | Create account with email, password, username, display name |
-| Email Verification | Supabase-powered email confirmation with deep linking |
+| Email Verification | Supabase-powered confirmation with deep linking |
 | Sign In | Login via email or username |
-| Profile Management | Edit avatar, bio, display name |
-| Delete Account | Full account deletion via RPC |
+| Profile Management | Edit avatar, bio, display name, username |
+| Delete Account | Full account deletion via SECURITY DEFINER RPC |
 
-### Movie & TV Discovery
+### Content Discovery
 | Feature | Description |
 |---------|-------------|
 | TMDB Integration | Full movie/TV database with posters, metadata, cast/crew |
-| Search | Search movies, TV shows, and people |
-| Movie Detail | Overview, cast, crew, trailers, similar titles |
-| TV Show Detail | Seasons, episodes, progress tracking |
-| Person Pages | Filmography, known-for titles |
+| OMDb Ratings | IMDb, Rotten Tomatoes, and Metascore display |
+| Search | Search movies, TV shows, and people (adult content filtered) |
+| Title Detail | Overview, cast/crew tabs, trailers, similar titles, friends' activity |
+| Person Pages | Bio, filmography, known-for titles |
+| Pick for Me | Recommendation engine with genre, mood, and time filters |
+| Spotlight | Featured trending content carousel |
+| Genre/Person Filters | Filter discover page by genre or cast/crew member |
 
 ### Rating & Reviewing
 | Feature | Description |
 |---------|-------------|
-| Star Rating | 1-5 star rating system |
-| Written Reviews | Optional text review with rating |
-| Review Visibility | Reviews appear in activity feed |
-| Edit/Delete | Modify or remove reviews |
+| Half-Star Ratings | 0.5–5 star rating with 0.5 increments |
+| Written Reviews | Optional text review with privacy toggle |
+| Watch Date Tracking | Record when you watched (supports multiple dates for rewatches) |
+| Friend Tagging | Tag friends in reviews |
+| Season Ratings | Per-season star ratings for TV shows with optional mini-reviews |
 
 ### Ranking System
 | Feature | Description |
 |---------|-------------|
-| Star-Tier Rankings | Separate ranked lists for each star level (5★, 4★, etc.) |
-| Pairwise Comparisons | Binary search to find exact position |
-| Drag-to-Reorder | Manual repositioning within tier |
-| Auto-Promotion/Demotion | Score recalculates on position change |
-| Display Scores | Decimal scores (1.0-10.0) derived from position |
+| Pairwise Comparisons | Binary search to find exact position among same-tier titles |
+| Display Scores | 1.0–10.0 scores derived from position within star tier |
+| Drag-to-Reorder | Manual repositioning with haptic feedback |
+| Separate Rankings | Independent movie and TV show ranked lists |
+| Auto Watchlist Removal | Titles removed from watchlist after ranking |
 
 ### Social Features
 | Feature | Description |
 |---------|-------------|
-| Activity Feed | See friends' watches, ratings, reviews |
-| Follow System | Follow/unfollow users |
-| User Profiles | View others' stats, rankings, activity |
-| Friend Picker | Select friends for sharing/recommendations |
-| Notifications | Follows, likes, comments |
+| Activity Feed | See followed users' watches, ratings, reviews |
+| Follow System | Instant follow/unfollow (no approval needed) |
+| Likes & Comments | Like activities, comment with threaded replies |
+| Comment Likes | Like individual comments |
+| User Profiles | View others' stats, rankings, taste insights |
+| Notifications | Likes, comments, replies, tags, follows with push support |
+| Leaderboard | Top rankers by count with trophy icons |
 
 ### Lists & Organization
 | Feature | Description |
 |---------|-------------|
-| Watchlist/Bookmarks | Save movies to watch later |
-| Custom Lists | Create themed collections |
-| Currently Watching | Track TV show progress |
+| Watchlist | Bookmark titles to watch later |
+| Currently Watching | Track TV show progress (season/episode) |
+| Custom Lists | Create themed collections with icons, public/private toggle |
+| Drag-to-Reorder | Reorder items within custom lists |
 
-### Discovery Features
+### Profile & Insights
 | Feature | Description |
 |---------|-------------|
-| Pick for Me | AI-powered random suggestion |
-| Spotlight | Featured/trending content |
-| Friends Watching | See what friends are currently viewing |
-| Horizontal Carousels | Browse by category |
+| Taste Insights | Top genres, favorite director, favorite actor, favorite decade |
+| Stats | Total films, shows, watch time, rank count |
+| Recent Activity | Timeline of user's activity |
 
 ---
 
-## Ranking System — Deep Technical Specification
+## App Screens
 
-### Data Model
+### Tabs (`app/(tabs)/`)
+| Screen | File | Description |
+|--------|------|-------------|
+| Feed | `index.tsx` | Activity feed from followed users |
+| Discover | `discover.tsx` | Search, browse, genre filters, spotlight, pick-for-me |
+| Lists | `lists.tsx` | Rankings, watchlist, currently watching, custom lists |
+| Leaderboard | `leaderboard.tsx` | Top rankers by movie/show count |
+| Profile | `profile.tsx` | User stats, taste insights, recent activity |
 
-```sql
-CREATE TABLE rankings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  content_id UUID NOT NULL REFERENCES content(id) ON DELETE CASCADE,
-  content_type TEXT NOT NULL CHECK (content_type IN ('movie', 'tv')),
-  star_rating INTEGER NOT NULL CHECK (star_rating BETWEEN 1 AND 5),
-  rank_position INTEGER NOT NULL,
-  display_score DECIMAL(3,1) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
+### Auth (`app/(auth)/`)
+| Screen | File | Description |
+|--------|------|-------------|
+| Landing | `index.tsx` | Auth landing page |
+| Sign In | `sign-in.tsx` | Email/password login |
+| Sign Up | `sign-up.tsx` | Registration with username |
+| Verify Email | `verify-email.tsx` | Email verification flow |
 
-  CONSTRAINT rankings_user_content_unique UNIQUE (user_id, content_id),
-  CONSTRAINT rankings_user_content_type_position_key
-    UNIQUE (user_id, content_type, rank_position) DEFERRABLE INITIALLY IMMEDIATE
-);
+### Content Detail
+| Screen | File | Description |
+|--------|------|-------------|
+| Title Detail | `title/[id].tsx` | Universal movie/TV detail page |
+| Person | `person/[id].tsx` | Actor/director filmography |
+| Movie (Legacy) | `movie/[id].tsx` | Legacy movie detail |
+
+### Activity & Social
+| Screen | File | Description |
+|--------|------|-------------|
+| Log Activity | `log-activity/[contentId].tsx` | Rate, review, log progress |
+| Activity Detail | `activity-detail/[id].tsx` | Full activity with likes/comments |
+| Review Detail | `review-detail/[id].tsx` | Review with nested comments |
+| Activity History | `activity-history/[contentId].tsx` | Watch history for a title |
+| User Activity | `user-activity/[userId].tsx` | User's activity timeline |
+| User Profile | `user/[id].tsx` | Other user's profile |
+| Notifications | `notifications.tsx` | Notification feed with mark-as-read |
+
+### Rankings & Lists
+| Screen | File | Description |
+|--------|------|-------------|
+| Rankings | `rankings.tsx` | Draggable ranked list with scores |
+| Rank Flow | `rank/[movieId].tsx` | Binary insertion ranking modal |
+| Watchlist | `watchlist.tsx` | Bookmarked titles |
+| Currently Watching | `currently-watching.tsx` | In-progress watches |
+| List Detail | `list/[id].tsx` | Custom list with reorder |
+| Create List | `create-list.tsx` | New list with icon picker |
+
+### User Management
+| Screen | File | Description |
+|--------|------|-------------|
+| Follow List | `follow-list.tsx` | Followers/following |
+| Friend Picker | `friend-picker.tsx` | Tag friends in reviews |
+| Settings | `settings.tsx` | App settings |
+| Account | `account.tsx` | Account details, delete account |
+| Edit Profile | `edit-profile.tsx` | Edit username, bio, avatar |
+| About | `about-feedback.tsx` | About page and feedback |
+| Review (Legacy) | `review/[movieId].tsx` | Legacy review modal |
+
+---
+
+## Lib Modules (`lib/`)
+
+### API & Data
+| Module | Description |
+|--------|-------------|
+| `tmdb.ts` | TMDB API client: search, trending, discover, details, cast, videos |
+| `omdb.ts` | OMDb API: IMDb/Rotten Tomatoes/Metascore ratings |
+| `supabase.ts` | Supabase client initialization |
+| `content.ts` | Ensure content exists in DB, get by TMDB ID |
+
+### Core Features
+| Module | Description |
+|--------|-------------|
+| `ranking.ts` | Binary insertion algorithm, score bands, reorder, display scores |
+| `activity.ts` | Activity CRUD, watch cycles, progress tracking |
+| `social.ts` | Likes, comments (with replies), notifications, average ratings |
+| `follows.ts` | Follow/unfollow, follower lists, user search, top rankers |
+| `season-ratings.ts` | Per-season TV ratings CRUD |
+| `pick-for-me.ts` | Recommendation engine with scoring algorithm |
+| `user-lists.ts` | Custom list CRUD, add/remove/reorder items |
+| `watch-history.ts` | Watch date tracking for movies |
+
+### Utilities
+| Module | Description |
+|--------|-------------|
+| `recommendations.ts` | Personalized content recommendations |
+| `profile-insights.ts` | Taste analytics: top genres, director, actor, decade |
+| `spotlight.ts` | Spotlight carousel content |
+| `validation.ts` | Input validation helpers |
+| `cache.ts` | In-memory caching layer |
+| `version.ts` | App version management |
+| `push-notifications.ts` | Expo push token registration and handling |
+| `friend-picker-state.ts` | Friend picker state management |
+
+### Hooks
+| Hook | Description |
+|------|-------------|
+| `hooks/useFeed.ts` | Cached feed data |
+| `hooks/useUserData.ts` | Cached user profile/stats |
+| `hooks/useAppUpdate.ts` | App update detection via `app_config` table |
+
+### Context
+| Provider | Description |
+|----------|-------------|
+| `auth-context.tsx` | Authentication state and session management |
+| `cache-context.tsx` | Cache invalidation across screens |
+
+---
+
+## Database Schema (20 tables)
+
+### Core Tables
+| Table | Purpose |
+|-------|---------|
+| `users` | User profiles (extends auth.users): username, display_name, bio, avatar, curation_identity |
+| `content` | Unified movies & TV shows cached from TMDB: tmdb_id, content_type, title, genres, runtime, lead_actor |
+| `activity_log` | All user activity: status (completed/in_progress/bookmarked), star_rating (0.5–5), review_text, tagged_friends, watch_date |
+| `watches` | Watch cycles for rewatches: watch_number, status, started_at, completed_at |
+| `rankings` | Ranked content: rank_position, display_score (1–10), content_type (movie/tv) |
+
+### Engagement Tables
+| Table | Purpose |
+|-------|---------|
+| `bookmarks` | Watchlist items (user_id, content_id) |
+| `likes` | Activity/review likes |
+| `comments` | Comments with threaded replies (parent_id) |
+| `comment_likes` | Comment likes |
+| `season_ratings` | Per-season TV ratings with half-star support and review text |
+
+### Social Tables
+| Table | Purpose |
+|-------|---------|
+| `follows` | Instant follow system (follower_id, following_id) |
+| `notifications` | In-app notifications: like, comment, tagged, follow, reply |
+| `push_tokens` | Expo push notification tokens per device |
+
+### System Tables
+| Table | Purpose |
+|-------|---------|
+| `app_config` | App version management for update prompts |
+| `user_lists` | Custom user-created lists with icons and public/private toggle |
+| `user_list_items` | Items within custom lists with position ordering |
+| `pick_suggestions` | Pick-for-me suggestion tracking with scoring breakdown |
+
+### Legacy Tables (still active, not yet migrated)
+| Table | Purpose |
+|-------|---------|
+| `movies` | Original TMDB movie cache (superseded by `content`, still written to) |
+| `reviews` | Original review table (superseded by `activity_log`, review modal still writes here) |
+| `watch_history` | Watch date tracking for movies |
+
+### Key RPC Functions
+| Function | Purpose |
+|----------|---------|
+| `reorder_rankings_batch` | Atomic batch ranking reorder with deferred constraints |
+| `shift_rankings_down` | Shift positions for new ranking insertion (descending order) |
+| `delete_user_account` | Secure self-deletion with cascade cleanup |
+| `check_email_verified` | Check email verification status |
+| `resolve_notification_target` | Resolve notification review_id to navigation data (SECURITY DEFINER) |
+| `handle_new_user` | Auto-create user profile on auth signup |
+| `handle_new_notification` | Trigger push notification edge function on notification insert |
+
+---
+
+## Edge Functions (`supabase/functions/`)
+
+| Function | Purpose |
+|----------|---------|
+| `push-notification` | Sends Expo push notifications on notification INSERT (triggered by database webhook) |
+| `broadcast-notification` | Sends notifications to multiple users at once |
+| `backfill-lead-actor` | One-time data backfill for lead actor field in content table |
+
+---
+
+## Environment Setup
+
+### Dev/Prod Separation
+| Environment | Supabase Project | Purpose |
+|-------------|-----------------|---------|
+| Development | `seen-dev` (`snrzwaqdhkqsnuwphxnz`) | Local dev, safe to break |
+| Production | `Seen` (`hsuydsuebluhycdeqghv`) | Real users, protected |
+
+### Environment Files
+| File | Purpose |
+|------|---------|
+| `.env` | Default local dev (points to dev project) |
+| `.env.development` | Dev project keys (not committed) |
+| `.env.production` | Production keys (not committed, used by deploy script) |
+
+### EAS Build Profiles
+| Profile | APP_ENV | Use |
+|---------|---------|-----|
+| `development` | `development` | Dev client with hot reload |
+| `preview` | `development` | Internal distribution testing |
+| `production` | `production` | App Store submission |
+
+### Deploy Command
+```bash
+npm run deploy  # or: bash scripts/deploy.sh
 ```
+Builds iOS, submits to App Store, updates `app_config.latest_version` in Supabase. Requires confirmation, `.env.production`, and clean git state.
 
-**Key Constraints**:
-- Each user can only rank a piece of content once
-- Position must be unique within (user, content_type)
-- Position constraint is deferrable for batch reordering operations
+---
 
-### Star Rating → Score Band Mapping
+## Ranking System — Technical Specification
+
+### Star Rating to Score Band Mapping
 
 | Star Rating | Score Range | Band Width |
 |-------------|-------------|------------|
-| 5★ | 9.5 – 10.0 | 0.5 |
-| 4★ | 8.0 – 9.4 | 1.4 |
-| 3★ | 6.0 – 7.9 | 1.9 |
-| 2★ | 4.0 – 5.9 | 1.9 |
-| 1★ | 1.0 – 3.9 | 2.9 |
+| 5 stars | 9.5 – 10.0 | 0.5 |
+| 4 stars | 8.0 – 9.4 | 1.4 |
+| 3 stars | 6.0 – 7.9 | 1.9 |
+| 2 stars | 4.0 – 5.9 | 1.9 |
+| 1 star | 1.0 – 3.9 | 2.9 |
 
-**Score Calculation Formula**:
-```typescript
-function calculateDisplayScore(
-  starRating: number,
-  position: number,
-  totalInTier: number
-): number {
-  const bands = {
-    5: { min: 9.5, max: 10.0 },
-    4: { min: 8.0, max: 9.4 },
-    3: { min: 6.0, max: 7.9 },
-    2: { min: 4.0, max: 5.9 },
-    1: { min: 1.0, max: 3.9 },
-  };
+### How Ranking Works
 
-  const { min, max } = bands[starRating];
+1. User rates a title (0.5–5 stars)
+2. System finds all titles in the same star tier
+3. Binary search via pairwise comparisons ("Do you prefer A or B?") finds exact position
+4. Existing rankings shift down to make room (`shift_rankings_down` RPC)
+5. Display score calculated from position within tier
+6. Title auto-removed from watchlist if bookmarked
 
-  if (totalInTier === 1) return max;
-
-  // Position 1 = highest score, position N = lowest score
-  const range = max - min;
-  const step = range / (totalInTier - 1);
-  return max - (position - 1) * step;
-}
-```
-
-### Pairwise Comparison Logic
-
-When a user rates a movie, the system uses **binary insertion search** to find its position:
-
-```typescript
-async function findRankPosition(
-  userId: string,
-  contentType: string,
-  starRating: number,
-  newContentId: string
-): Promise<number> {
-  // Get all items in the same star tier
-  const tierItems = await getRankingsInTier(userId, contentType, starRating);
-
-  if (tierItems.length === 0) return 1;
-
-  // Binary search through comparisons
-  let low = 0;
-  let high = tierItems.length;
-
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    const comparison = await askUserComparison(newContentId, tierItems[mid].contentId);
-
-    if (comparison === 'better') {
-      high = mid; // New item ranks higher (lower position number)
-    } else {
-      low = mid + 1; // New item ranks lower (higher position number)
-    }
-  }
-
-  return low + 1; // 1-indexed position
-}
-```
-
-**Comparison Selection Strategy**:
-The system selects comparison candidates based on similarity:
-- Genre overlap
-- Release year proximity
-- Director/cast overlap
-- User's existing scores for similar content
-
-### Reordering Logic
-
-When a user drags an item to a new position:
-
-```typescript
-async function reorderRanking(
-  userId: string,
-  contentType: string,
-  rankingId: string,
-  fromPosition: number,
-  toPosition: number
-): Promise<void> {
-  // Determine star tier changes
-  const ranking = await getRanking(rankingId);
-  const targetNeighbors = await getNeighborsAtPosition(userId, contentType, toPosition);
-
-  // Check if crossing star tier boundary
-  const newStarRating = determineStarTier(targetNeighbors);
-
-  if (newStarRating !== ranking.star_rating) {
-    // Promote or demote to new tier
-    ranking.star_rating = newStarRating;
-  }
-
-  // Shift other items to make room
-  await shiftRankingsDown(userId, contentType, toPosition);
-
-  // Update the moved item
-  await updateRankingPosition(rankingId, toPosition);
-
-  // Recalculate all display scores in affected tiers
-  await recalculateDisplayScores(userId, contentType);
-}
-```
-
-**Batch Reordering RPC**:
-```sql
-CREATE OR REPLACE FUNCTION public.reorder_rankings_batch(
-  p_user_id uuid,
-  p_content_type text,
-  p_rankings jsonb
-)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO ''
-AS $function$
-BEGIN
-  -- Defer unique constraint to allow position swaps
-  SET CONSTRAINTS public.rankings_user_content_type_position_key DEFERRED;
-
-  -- Update all positions in a single operation
-  UPDATE public.rankings r
-  SET
-    rank_position = (item->>'rank_position')::INT,
-    display_score = (item->>'display_score')::DECIMAL,
-    updated_at = NOW()
-  FROM jsonb_array_elements(p_rankings) AS item
-  WHERE r.id = (item->>'id')::UUID
-    AND r.user_id = p_user_id
-    AND r.content_type = p_content_type;
-END;
-$function$;
-```
-
-### Edge Case Handling
-
-| Edge Case | Handling |
-|-----------|----------|
-| First item in tier | Assign max score for that tier |
-| Only item in tier | Assign max score for that tier |
-| Move across tier boundary | Update star_rating, recalculate score in new tier |
-| Delete ranked item | Shift all lower items up, recalculate scores |
-| Rate same content twice | Update existing ranking, potentially reposition |
-| Concurrent edits | Deferrable constraints prevent position conflicts |
-
-### Neighbor-Aware Score Calculation
-
-When repositioning, the display score is interpolated based on neighbors:
-
-```typescript
-function calculateNeighborAwareScore(
-  position: number,
-  upperNeighbor: { position: number; score: number } | null,
-  lowerNeighbor: { position: number; score: number } | null,
-  tierBounds: { min: number; max: number }
-): number {
-  if (!upperNeighbor && !lowerNeighbor) {
-    return tierBounds.max;
-  }
-
-  if (!upperNeighbor) {
-    // At top of list
-    return Math.min(tierBounds.max, lowerNeighbor.score + 0.1);
-  }
-
-  if (!lowerNeighbor) {
-    // At bottom of list
-    return Math.max(tierBounds.min, upperNeighbor.score - 0.1);
-  }
-
-  // Between two items - interpolate
-  return (upperNeighbor.score + lowerNeighbor.score) / 2;
-}
-```
-
-### Database-Level Logic
-
-**Shift Rankings RPC** (used when inserting at a position):
-```sql
-CREATE OR REPLACE FUNCTION public.shift_rankings_down(
-  p_user_id uuid,
-  p_content_type text,
-  p_from_position integer
-)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO ''
-AS $function$
-DECLARE
-  r RECORD;
-BEGIN
-  -- Iterate in reverse order to avoid constraint violations
-  FOR r IN
-    SELECT id FROM public.rankings
-    WHERE user_id = p_user_id
-      AND content_type = p_content_type
-      AND rank_position >= p_from_position
-    ORDER BY rank_position DESC
-  LOOP
-    UPDATE public.rankings
-    SET rank_position = rank_position + 1, updated_at = NOW()
-    WHERE id = r.id;
-  END LOOP;
-END;
-$function$;
-```
-
-**Performance Indexes**:
-```sql
--- Fast lookup of user's rankings by content type
-CREATE INDEX idx_rankings_user_content_type
-  ON rankings(user_id, content_type);
-
--- Fast position-based queries
-CREATE INDEX idx_rankings_user_type_position
-  ON rankings(user_id, content_type, rank_position);
-
--- Fast lookup by star tier
-CREATE INDEX idx_rankings_user_type_star
-  ON rankings(user_id, content_type, star_rating);
-```
-
----
-
-## Database Schema Overview
-
-### Core Tables
-
-| Table | Purpose |
-|-------|---------|
-| `users` | User profiles (synced from auth.users) |
-| `content` | Unified movies & TV shows (cached from TMDB) |
-| `rankings` | User's ranked content with scores |
-| `activity_log` | All user activity (watches, ratings, reviews) |
-| `follows` | User follow relationships |
-| `notifications` | In-app notifications |
-| `user_lists` | Custom user-created lists |
-| `user_list_items` | Items in custom lists |
-| `bookmarks` | Watchlist/saved items |
-
-### Activity Log Types
-
-```sql
-CHECK (activity_type IN (
-  'watch',           -- Marked as watched
-  'rewatch',         -- Watched again
-  'rating',          -- Gave star rating
-  'review',          -- Wrote review
-  'rank',            -- Added to rankings
-  'list_add',        -- Added to custom list
-  'bookmark'         -- Saved to watchlist
-))
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React Native (Expo) |
-| Navigation | Expo Router |
-| Backend | Supabase (PostgreSQL + Auth + Storage) |
-| External API | TMDB (movie/TV metadata) |
-| State | React Context + Custom hooks |
-| Styling | React Native StyleSheet |
-| Analytics | PostHog |
-| Error Tracking | Sentry |
+### Reordering
+- Drag-to-reorder updates all affected positions atomically via `reorder_rankings_batch` RPC
+- Unique constraint `(user_id, content_type, rank_position)` is `DEFERRABLE INITIALLY DEFERRED` to allow batch swaps
+- Moving across star tier boundaries updates the star rating
 
 ---
 
@@ -420,23 +363,53 @@ CHECK (activity_type IN (
 
 ```
 Seen/
-├── app/                    # Expo Router screens
-│   ├── (auth)/            # Auth screens (sign-in, sign-up, verify)
-│   ├── (tabs)/            # Main tab screens (home, discover, profile)
-│   ├── movie/[id].tsx     # Movie detail
-│   ├── rank/[movieId].tsx # Ranking flow
+├── app/                          # Expo Router screens
+│   ├── (auth)/                   # Auth flow (sign-in, sign-up, verify)
+│   ├── (tabs)/                   # Main tabs (feed, discover, lists, leaderboard, profile)
+│   ├── title/[id].tsx            # Universal title detail
+│   ├── person/[id].tsx           # Person filmography
+│   ├── rank/[movieId].tsx        # Ranking flow
+│   ├── log-activity/[contentId].tsx  # Log/rate/review
+│   ├── activity-detail/[id].tsx  # Activity with comments
+│   ├── user/[id].tsx             # User profile
+│   ├── notifications.tsx         # Notification feed
+│   ├── rankings.tsx              # Ranked list with reorder
+│   ├── watchlist.tsx             # Bookmarked titles
+│   ├── currently-watching.tsx    # In-progress watches
+│   ├── list/[id].tsx             # Custom list detail
+│   ├── create-list.tsx           # New list creation
+│   ├── settings.tsx              # App settings
+│   └── _layout.tsx               # Root layout (auth, Sentry, PostHog)
+├── components/                   # Reusable UI components
+│   ├── ui/                       # Base elements (star-rating, loaders, icons)
+│   ├── activity-feed-card.tsx    # Feed activity card
+│   ├── draggable-rank-list/      # Drag-and-drop ranking
+│   ├── pick-for-me-modal.tsx     # Pick recommendation modal
+│   ├── season-rating-sheet.tsx   # Season rating bottom sheet
+│   ├── add-to-list-modal.tsx     # Add to list modal
 │   └── ...
-├── components/            # Reusable UI components
-│   ├── ui/               # Base UI elements
-│   └── ...               # Feature components
-├── lib/                   # Core logic
-│   ├── auth-context.tsx  # Auth state
-│   ├── ranking.ts        # Ranking algorithms
-│   ├── tmdb.ts           # TMDB API client
-│   ├── social.ts         # Follow/activity logic
-│   └── ...
-├── constants/             # Theme, config
-├── types/                 # TypeScript definitions
-└── supabase/
-    └── migrations/        # Database migrations
+├── lib/                          # Core business logic
+│   ├── ranking.ts                # Ranking algorithm & score calculation
+│   ├── activity.ts               # Activity CRUD & watch cycles
+│   ├── social.ts                 # Likes, comments, notifications
+│   ├── follows.ts                # Follow system & user search
+│   ├── tmdb.ts                   # TMDB API client
+│   ├── pick-for-me.ts            # Recommendation engine
+│   ├── season-ratings.ts         # TV season ratings
+│   ├── user-lists.ts             # Custom lists
+│   ├── auth-context.tsx          # Auth state provider
+│   ├── cache-context.tsx         # Cache invalidation
+│   └── hooks/                    # Custom React hooks
+├── constants/                    # Theme colors, config
+├── types/                        # TypeScript definitions
+├── assets/                       # Images, fonts
+├── supabase/
+│   ├── schema.sql                # Base database schema
+│   ├── migrations/               # Sequential migrations (001–033)
+│   └── functions/                # Edge functions (push notifications)
+├── scripts/
+│   └── deploy.sh                 # Production deploy script
+├── app.config.ts                 # Dynamic Expo config (dev/prod names)
+├── eas.json                      # EAS Build profiles
+└── CLAUDE.md                     # AI assistant instructions
 ```
