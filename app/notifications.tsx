@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { Image } from 'expo-image';
@@ -20,6 +21,7 @@ import {
   markAllNotificationsRead,
 } from '@/lib/social';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 import { Notification } from '@/types';
 
 export default function NotificationsScreen() {
@@ -80,26 +82,55 @@ export default function NotificationsScreen() {
 
     // Navigate based on notification type
     switch (notification.type) {
-      case 'comment':
-      case 'reply':
-        // Navigate to activity detail page with comment_id to scroll to
-        if (notification.activity?.id) {
-          const commentParam = notification.comment_id ? `?commentId=${notification.comment_id}` : '';
-          router.push(`/activity-detail/${notification.activity.id}${commentParam}` as any);
-        }
-        break;
-      case 'like':
-      case 'tagged':
-        // Navigate to activity detail page
-        if (notification.activity?.id) {
-          router.push(`/activity-detail/${notification.activity.id}` as any);
-        }
-        break;
       case 'follow':
         if (notification.actor_id) {
           router.push(`/user/${notification.actor_id}`);
         }
         break;
+      default: {
+        // For like, comment, tagged, reply — navigate to activity detail
+        // Try pre-fetched activity data first
+        if (notification.activity?.id) {
+          const commentParam = (notification.type === 'comment' || notification.type === 'reply')
+            && notification.comment_id ? `?commentId=${notification.comment_id}` : '';
+          router.push(`/activity-detail/${notification.activity.id}${commentParam}` as any);
+          break;
+        }
+
+        // Try pre-fetched legacy review data
+        if (notification.review?.movie_id) {
+          router.push(`/title/${notification.review.movie_id}?type=movie` as any);
+          break;
+        }
+
+        // Resolve review_id using SECURITY DEFINER function (bypasses RLS for private content)
+        if (notification.review_id) {
+          const { data: target } = await supabase.rpc('resolve_notification_target', {
+            p_review_id: notification.review_id,
+          });
+
+          if (target?.type === 'activity') {
+            const commentParam = (notification.type === 'comment' || notification.type === 'reply')
+              && notification.comment_id ? `?commentId=${notification.comment_id}` : '';
+            router.push(`/activity-detail/${notification.review_id}${commentParam}` as any);
+            break;
+          }
+          if (target) {
+            router.push(`/title/${target.tmdb_id}?type=${target.content_type}` as any);
+            break;
+          }
+
+          // Activity was deleted — inform the user
+          Alert.alert('Not Available', 'This review is no longer available.');
+          break;
+        }
+
+        // No review_id at all — go to actor's profile
+        if (notification.actor_id) {
+          router.push(`/user/${notification.actor_id}` as any);
+        }
+        break;
+      }
     }
   };
 

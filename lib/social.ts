@@ -294,21 +294,39 @@ export async function getNotifications(
   const results = await Promise.allSettled(
     data.map(async (notification) => {
       if (notification.review_id) {
-        // Fetch activity to get content_id
-        const { data: activity } = await supabase
-          .from('activity_log')
-          .select('id, content_id, status, content:content(id, tmdb_id, title, poster_url, content_type)')
-          .eq('id', notification.review_id)
-          .single();
+        // Use SECURITY DEFINER function to bypass RLS for tagged/private content
+        const { data: target } = await supabase.rpc('resolve_notification_target', {
+          p_review_id: notification.review_id,
+        });
 
-        if (activity?.content) {
+        if (target?.type === 'activity') {
           return {
             ...notification,
             activity: {
-              id: activity.id,
-              content_id: activity.content_id,
-              status: activity.status,
-              content: activity.content,
+              id: notification.review_id,
+              content_id: 0,
+              status: target.status,
+              content: {
+                id: 0,
+                tmdb_id: target.tmdb_id,
+                title: target.title,
+                poster_url: target.poster_url,
+                content_type: target.content_type,
+              },
+            },
+          };
+        }
+        if (target?.type === 'review') {
+          return {
+            ...notification,
+            review: {
+              id: notification.review_id,
+              movie_id: target.tmdb_id,
+              movies: {
+                id: target.tmdb_id,
+                title: target.title,
+                poster_url: target.poster_url,
+              },
             },
           };
         }

@@ -271,7 +271,7 @@ export async function searchMovies(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBSearchResponse>('/search/movie', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'true',
+    include_adult: 'false',
   });
 
   return {
@@ -442,7 +442,7 @@ export async function searchTVShows(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBTVSearchResponse>('/search/tv', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'true',
+    include_adult: 'false',
   });
 
   return {
@@ -579,7 +579,7 @@ export async function searchAll(query: string, page: number = 1): Promise<{
   const data = await tmdbFetch<TMDBMultiSearchResult>('/search/multi', {
     query: query.trim(),
     page: page.toString(),
-    include_adult: 'true',
+    include_adult: 'false',
   });
 
   const results = data.results

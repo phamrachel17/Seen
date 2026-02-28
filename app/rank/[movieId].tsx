@@ -183,6 +183,23 @@ export default function RankingModal() {
       await saveRanking(user!.id, state.newMovie, state.tierPosition, rating, type, state.tiedWithIndex, state.tierMovies);
       // Invalidate caches on successful ranking creation
       invalidate('ranking_create', user!.id);
+
+      // Remove from watchlist if bookmarked
+      const { data: contentData } = await supabase
+        .from('content')
+        .select('id')
+        .eq('tmdb_id', state.newMovie.id)
+        .single();
+
+      if (contentData) {
+        await supabase
+          .from('bookmarks')
+          .delete()
+          .eq('user_id', user!.id)
+          .eq('content_id', contentData.id);
+        invalidate('bookmark_change', user!.id);
+      }
+
       // Navigate to lists quickly
       setTimeout(() => {
         router.replace('/(tabs)/lists');

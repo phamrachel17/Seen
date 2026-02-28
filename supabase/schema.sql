@@ -75,18 +75,7 @@ CREATE TABLE IF NOT EXISTS public.bookmarks (
   UNIQUE(user_id, movie_id)
 );
 
--- Friendships
-CREATE TABLE IF NOT EXISTS public.friendships (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
-  friend_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
-  status TEXT CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id, friend_id),
-  CHECK (user_id != friend_id)
-);
-
--- Follows (instant follow system)
+-- Follows (instant follow system, replaced legacy friendships table)
 CREATE TABLE IF NOT EXISTS public.follows (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   follower_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -102,8 +91,6 @@ CREATE INDEX IF NOT EXISTS idx_reviews_movie_id ON public.reviews(movie_id);
 CREATE INDEX IF NOT EXISTS idx_rankings_user_id ON public.rankings(user_id);
 CREATE INDEX IF NOT EXISTS idx_rankings_rank_position ON public.rankings(user_id, rank_position);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON public.bookmarks(user_id);
-CREATE INDEX IF NOT EXISTS idx_friendships_user_id ON public.friendships(user_id);
-CREATE INDEX IF NOT EXISTS idx_friendships_friend_id ON public.friendships(friend_id);
 CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON public.follows(follower_id);
 CREATE INDEX IF NOT EXISTS idx_follows_following_id ON public.follows(following_id);
 
@@ -115,7 +102,6 @@ ALTER TABLE public.movies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rankings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookmarks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 
 -- Users policies
@@ -164,19 +150,6 @@ CREATE POLICY "Users can view own bookmarks" ON public.bookmarks
 
 CREATE POLICY "Users can manage own bookmarks" ON public.bookmarks
   FOR ALL USING (auth.uid() = user_id);
-
--- Friendships policies
-CREATE POLICY "Users can view own friendships" ON public.friendships
-  FOR SELECT USING (auth.uid() = user_id OR auth.uid() = friend_id);
-
-CREATE POLICY "Users can create friendship requests" ON public.friendships
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update friendships they're part of" ON public.friendships
-  FOR UPDATE USING (auth.uid() = user_id OR auth.uid() = friend_id);
-
-CREATE POLICY "Users can delete own friendship requests" ON public.friendships
-  FOR DELETE USING (auth.uid() = user_id);
 
 -- Follows policies
 CREATE POLICY "Follows are viewable by everyone" ON public.follows

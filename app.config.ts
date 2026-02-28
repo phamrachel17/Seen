@@ -1,0 +1,83 @@
+import { ExpoConfig, ConfigContext } from 'expo/config';
+
+const IS_DEV = process.env.APP_ENV === 'development';
+
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: IS_DEV ? 'Seen (Dev)' : 'Seen',
+  slug: 'seen',
+  version: '1.0.7',
+  orientation: 'portrait',
+  icon: './assets/images/manAndTv.jpg',
+  scheme: 'seen',
+  userInterfaceStyle: 'automatic',
+  newArchEnabled: true,
+  ios: {
+    supportsTablet: true,
+    bundleIdentifier: 'app.seen.ios',
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+      NSPhotoLibraryUsageDescription:
+        'Seen uses your photo library to let you choose a profile picture. Your selected photo will be visible to other users on your profile.',
+    },
+  },
+  android: {
+    adaptiveIcon: {
+      backgroundColor: '#E6F4FE',
+      foregroundImage: './assets/images/android-icon-foreground.png',
+      backgroundImage: './assets/images/android-icon-background.png',
+      monochromeImage: './assets/images/android-icon-monochrome.png',
+    },
+    edgeToEdgeEnabled: true,
+    predictiveBackGestureEnabled: false,
+  },
+  web: {
+    output: 'static' as const,
+    favicon: './assets/images/favicon.png',
+  },
+  plugins: [
+    'expo-router',
+    [
+      'expo-notifications',
+      {
+        color: '#802F1D',
+      },
+    ],
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/images/splash-icon.png',
+        imageWidth: 200,
+        resizeMode: 'contain',
+        backgroundColor: '#ffffff',
+        dark: {
+          backgroundColor: '#000000',
+        },
+      },
+    ],
+    'expo-font',
+    '@react-native-community/datetimepicker',
+    '@sentry/react-native',
+    [
+      '@sentry/react-native/expo',
+      {
+        url: 'https://sentry.io/',
+        project: 'seen',
+        organization: 'rachel-pham',
+      },
+    ],
+    'expo-localization',
+    'expo-secure-store',
+  ],
+  experiments: {
+    typedRoutes: true,
+    reactCompiler: true,
+  },
+  extra: {
+    router: {},
+    eas: {
+      projectId: '149955b4-6781-49d1-ae5d-9b8bca385111',
+    },
+    environment: process.env.APP_ENV || 'production',
+  },
+});

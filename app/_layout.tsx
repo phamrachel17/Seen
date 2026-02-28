@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -24,7 +24,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import * as Sentry from '@sentry/react-native';
-import { PostHogProvider } from 'posthog-react-native';
+import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
 import { useAppUpdate } from '@/lib/hooks/useAppUpdate';
@@ -35,7 +35,9 @@ import 'react-native-reanimated';
 // Initialize Sentry for crash reporting
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  debug: __DEV__,
   tracesSampleRate: 1.0,
+  environment: __DEV__ ? 'development' : 'production',
   _experiments: {
     profilesSampleRate: 1.0,
   },
@@ -48,6 +50,15 @@ function RootLayoutNav() {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const pathname = usePathname();
+  const posthog = usePostHog();
+
+  // Track screen views for PostHog analytics (DAU, session counts, screen flow)
+  useEffect(() => {
+    if (pathname) {
+      posthog?.screen(pathname);
+    }
+  }, [pathname]);
 
   // Check for app updates
   const {
