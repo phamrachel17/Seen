@@ -34,7 +34,7 @@ eas build --platform ios --profile production --non-interactive
 
 # Submit to App Store
 echo "Submitting to App Store..."
-eas submit --platform ios --profile production --non-interactive
+eas submit --platform ios --profile production --latest --non-interactive
 
 # Update Supabase app_config
 echo "Updating Supabase app_config.latest_version to ${VERSION}..."
