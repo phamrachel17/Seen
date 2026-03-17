@@ -1,6 +1,7 @@
-import { View, Text, StyleSheet, Pressable, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 
@@ -8,8 +9,8 @@ export default function AboutFeedbackScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const handleEmailPress = () => {
-    Linking.openURL('mailto:gloryboxed127@gmail.com?subject=Seen App Feedback');
+  const handleFeedbackPress = () => {
+    WebBrowser.openBrowserAsync('https://tally.so/r/gD44WK');
   };
 
   return (
@@ -46,11 +47,11 @@ export default function AboutFeedbackScreen() {
             I'd love to hear your thoughts. Bugs, suggestions, or little fixes — send them my way! This is the first app I've ever built, and your feedback will help me make it better.
           </Text>
           <Pressable
-            style={({ pressed }) => [styles.emailButton, pressed && styles.emailButtonPressed]}
-            onPress={handleEmailPress}
+            style={({ pressed }) => [styles.feedbackButton, pressed && styles.feedbackButtonPressed]}
+            onPress={handleFeedbackPress}
           >
-            <IconSymbol name="envelope" size={18} color={Colors.stamp} />
-            <Text style={styles.emailText}>Email me!</Text>
+            <IconSymbol name="square.and.pencil" size={18} color={Colors.stamp} />
+            <Text style={styles.feedbackText}>Share feedback</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -115,7 +116,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: Spacing.md,
   },
-  emailButton: {
+  feedbackButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
@@ -126,10 +127,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginTop: Spacing.sm,
   },
-  emailButtonPressed: {
+  feedbackButtonPressed: {
     opacity: 0.7,
   },
-  emailText: {
+  feedbackText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.md,
     color: Colors.stamp,

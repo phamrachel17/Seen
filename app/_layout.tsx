@@ -78,7 +78,10 @@ function RootLayoutNav() {
     if (!session && !inAuthGroup) {
       router.replace('/(auth)');
     } else if (session && inAuthGroup) {
-      router.replace('/(tabs)');
+      // Don't redirect away from reset-password (user needs to set new password after recovery)
+      if (segments[1] !== 'reset-password') {
+        router.replace('/(tabs)');
+      }
     }
   }, [session, loading, segments, router]);
 

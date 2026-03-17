@@ -12,92 +12,95 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, FontSizes, Spacing, BorderRadius } from '@/constants/theme';
-import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { getEmailByUsername, normalizeEmail } from '@/lib/validation';
 
-export default function SignInScreen() {
+export default function ResetPasswordScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuth();
-  const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const handleSignIn = async () => {
-    if (!emailOrUsername || !password) {
-      setError('Please fill in all fields');
+  const handleResetPassword = async () => {
+    if (!password || !confirmPassword) {
+      setError('Please fill in both fields');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
       return;
     }
 
     setLoading(true);
     setError(null);
 
-    const { error: signInError } = await signIn(emailOrUsername.trim(), password);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+      });
 
-    if (signInError) {
-      // Check if it's an unverified email error
-      if (signInError.message.includes('Email not confirmed')) {
-        // Determine the email to pass to verify screen
-        let email = emailOrUsername.trim();
-        if (!email.includes('@')) {
-          // It was a username, need to look up email
-          const foundEmail = await getEmailByUsername(email);
-          if (!foundEmail) {
-            // Username not found in database - show error instead of redirecting
-            setError('Username not found. Please check and try again.');
-            setLoading(false);
-            return;
-          }
-          email = foundEmail;
-        } else {
-          // Normalize email for consistency
-          email = normalizeEmail(email);
-        }
-
-        // Redirect to verify email screen
-        router.push({
-          pathname: '/(auth)/verify-email',
-          params: { email },
-        });
+      if (updateError) {
+        setError(updateError.message);
       } else {
-        setError(signInError.message);
+        await supabase.auth.signOut();
+        setSuccess(true);
       }
-      setLoading(false);
+    } catch (e) {
+      setError('Something went wrong. Please try again.');
     }
+
+    setLoading(false);
   };
+
+  if (success) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.centeredContent}>
+          <Text style={styles.title}>Seen</Text>
+
+          <View style={styles.iconContainer}>
+            <IconSymbol name="checkmark.circle.fill" size={64} color={Colors.success} />
+          </View>
+
+          <Text style={styles.heading}>Password Updated!</Text>
+          <Text style={styles.description}>
+            Your password has been reset successfully. You can now sign in with your new password.
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={() => router.replace('/(auth)/sign-in')}
+          >
+            <Text style={styles.buttonText}>Go to Sign In</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <Pressable style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backButtonText}>← Back</Text>
-      </Pressable>
-
       <View style={styles.content}>
         <Text style={styles.title}>Seen</Text>
-        <Text style={styles.subtitle}>Welcome back</Text>
+        <Text style={styles.subtitle}>Set a new password</Text>
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>EMAIL OR USERNAME</Text>
-            <TextInput
-              style={styles.input}
-              value={emailOrUsername}
-              onChangeText={setEmailOrUsername}
-              placeholder="your@email.com or username"
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>PASSWORD</Text>
+            <Text style={styles.label}>NEW PASSWORD</Text>
             <View style={styles.passwordContainer}>
               <TextInput
                 style={styles.passwordInput}
@@ -120,11 +123,31 @@ export default function SignInScreen() {
             </View>
           </View>
 
-          {error && <Text style={styles.errorText}>{error}</Text>}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>CONFIRM PASSWORD</Text>
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="••••••••"
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry={!showConfirm}
+              />
+              <Pressable
+                onPress={() => setShowConfirm(!showConfirm)}
+                style={styles.eyeButton}
+              >
+                <IconSymbol
+                  name={showConfirm ? 'eye.slash' : 'eye'}
+                  size={20}
+                  color={Colors.textMuted}
+                />
+              </Pressable>
+            </View>
+          </View>
 
-          <Pressable onPress={() => router.push('/(auth)/forgot-password')}>
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </Pressable>
+          {error && <Text style={styles.errorText}>{error}</Text>}
 
           <Pressable
             style={({ pressed }) => [
@@ -132,22 +155,16 @@ export default function SignInScreen() {
               pressed && styles.buttonPressed,
               loading && styles.buttonDisabled,
             ]}
-            onPress={handleSignIn}
+            onPress={handleResetPassword}
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color={Colors.white} />
+              <ActivityIndicator color={Colors.paper} />
             ) : (
-              <Text style={styles.buttonText}>Log In</Text>
+              <Text style={styles.buttonText}>Update Password</Text>
             )}
           </Pressable>
         </View>
-
-        <Pressable onPress={() => router.replace('/(auth)/sign-up')}>
-          <Text style={styles.switchText}>
-            Don&apos;t have an account? <Text style={styles.switchTextBold}>Sign up</Text>
-          </Text>
-        </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
@@ -158,19 +175,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  backButton: {
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-  },
-  backButtonText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textSecondary,
-  },
   content: {
     flex: 1,
     paddingHorizontal: Spacing.xl,
     justifyContent: 'center',
+  },
+  centeredContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
   },
   title: {
     fontFamily: Fonts.serifBold,
@@ -186,6 +200,26 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     marginBottom: Spacing['2xl'],
   },
+  iconContainer: {
+    marginTop: Spacing['3xl'],
+    marginBottom: Spacing.xl,
+  },
+  heading: {
+    fontFamily: Fonts.serifSemiBold,
+    fontSize: FontSizes['2xl'],
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  description: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.md,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+  },
   form: {
     gap: Spacing.lg,
   },
@@ -197,14 +231,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
     letterSpacing: 1.5,
-  },
-  input: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.lg,
-    color: Colors.text,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingVertical: Spacing.md,
   },
   passwordContainer: {
     flexDirection: 'row',
@@ -228,12 +254,6 @@ const styles = StyleSheet.create({
     color: Colors.error,
     textAlign: 'center',
   },
-  forgotText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.sm,
-    color: Colors.stamp,
-    textAlign: 'right',
-  },
   button: {
     backgroundColor: Colors.stamp,
     paddingVertical: Spacing.lg,
@@ -251,16 +271,5 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: FontSizes.md,
     color: Colors.paper,
-  },
-  switchText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.md,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    marginTop: Spacing['2xl'],
-  },
-  switchTextBold: {
-    fontFamily: Fonts.sansSemiBold,
-    color: Colors.stamp,
   },
 });

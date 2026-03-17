@@ -19,14 +19,14 @@ export default function AuthConfirmScreen() {
   useEffect(() => {
     // Validate token_hash is a non-empty string (not array or undefined)
     if (typeof token_hash === 'string' && token_hash.length > 0) {
-      verifyEmail();
+      verifyToken();
     } else {
       setStatus('error');
       setErrorMessage('Invalid confirmation link');
     }
   }, [token_hash]);
 
-  const verifyEmail = async () => {
+  const verifyToken = async () => {
     try {
       // Type assertion is safe here since we validate in useEffect
       const tokenHashStr = token_hash as string;
@@ -34,18 +34,21 @@ export default function AuthConfirmScreen() {
 
       const { error } = await supabase.auth.verifyOtp({
         token_hash: tokenHashStr,
-        type: (typeStr as 'signup' | 'email') || 'signup',
+        type: (typeStr as 'signup' | 'email' | 'recovery') || 'signup',
       });
 
       if (error) {
         setStatus('error');
         if (error.message.includes('expired')) {
-          setErrorMessage('This confirmation link has expired. Please request a new one.');
+          setErrorMessage('This link has expired. Please request a new one.');
         } else if (error.message.includes('already')) {
           setErrorMessage('This email has already been confirmed. You can sign in now.');
         } else {
           setErrorMessage(error.message);
         }
+      } else if (typeStr === 'recovery') {
+        // Recovery token verified — session created, redirect to reset password
+        router.replace('/(auth)/reset-password');
       } else {
         setStatus('success');
       }

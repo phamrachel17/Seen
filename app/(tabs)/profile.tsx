@@ -7,6 +7,8 @@ import {
   Pressable,
   RefreshControl,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,6 +49,7 @@ export default function ProfileScreen() {
   const [watchlistCount, setWatchlistCount] = useState(0);
   const [currentlyWatchingCount, setCurrentlyWatchingCount] = useState(0);
   const [insights, setInsights] = useState<ProfileInsights | null>(null);
+  const [showFeedbackNudge, setShowFeedbackNudge] = useState(false);
 
   // Ref to track if component is mounted (prevents state updates after unmount)
   const isMountedRef = useRef(true);
@@ -76,6 +79,13 @@ export default function ProfileScreen() {
         const movieCount = rankings.filter(r => r.content_type === 'movie').length;
         const showCount = rankings.filter(r => r.content_type === 'tv').length;
         setLocalStats({ totalMovies: movieCount, totalShows: showCount });
+
+        if (movieCount + showCount >= 5) {
+          const prompted = await AsyncStorage.getItem('feedback_prompted');
+          if (!prompted && isMountedRef.current) {
+            setShowFeedbackNudge(true);
+          }
+        }
       }
 
       // Load watchlist count
@@ -152,6 +162,17 @@ export default function ProfileScreen() {
     setIsRefreshing(false);
   };
 
+  const dismissFeedbackNudge = async () => {
+    await AsyncStorage.setItem('feedback_prompted', 'true');
+    setShowFeedbackNudge(false);
+  };
+
+  const openFeedbackForm = async () => {
+    await AsyncStorage.setItem('feedback_prompted', 'true');
+    setShowFeedbackNudge(false);
+    WebBrowser.openBrowserAsync('https://tally.so/r/gD44WK');
+  };
+
   const formatWatchTime = (minutes: number | null | undefined) => {
     if (minutes == null || minutes <= 0) {
       return '0h';
@@ -196,6 +217,24 @@ export default function ProfileScreen() {
           />
         }
       >
+        {/* Feedback Nudge - shown once after 5+ items logged */}
+        {showFeedbackNudge && (
+          <View style={styles.feedbackNudge}>
+            <View style={styles.feedbackNudgeContent}>
+              <Text style={styles.feedbackNudgeText}>Loving Seen so far? I'd love your feedback 💌</Text>
+              <Pressable
+                style={({ pressed }) => [styles.feedbackNudgeButton, pressed && styles.nudgeButtonPressed]}
+                onPress={openFeedbackForm}
+              >
+                <Text style={styles.feedbackNudgeButtonText}>Give feedback</Text>
+              </Pressable>
+            </View>
+            <Pressable style={styles.feedbackNudgeDismiss} onPress={dismissFeedbackNudge}>
+              <IconSymbol name="xmark" size={12} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
         {/* Profile Section - Horizontal Layout */}
         <View style={styles.profileSection}>
           {/* Left: Poster + @username */}
@@ -715,5 +754,45 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     flexShrink: 1,
     marginLeft: Spacing.md,
+  },
+  feedbackNudge: {
+    marginHorizontal: Spacing.xl,
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.dust,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  feedbackNudgeContent: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  feedbackNudgeText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.sm,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  feedbackNudgeButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.stamp,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+  },
+  nudgeButtonPressed: {
+    opacity: 0.8,
+  },
+  feedbackNudgeButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.sm,
+    color: Colors.paper,
+  },
+  feedbackNudgeDismiss: {
+    padding: Spacing.xs,
+    marginLeft: Spacing.sm,
   },
 });
